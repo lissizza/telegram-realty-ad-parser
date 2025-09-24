@@ -1,0 +1,22 @@
+# Ngrok configuration file
+# This file provides a permanent URL for your Telegram Web App
+# Auth token is read from NGROK_AUTHTOKEN environment variable
+
+version: "2"
+# Auth token will be read from NGROK_AUTHTOKEN environment variable
+# Set it in your .env file or export it: export NGROK_AUTHTOKEN=your_token
+
+tunnels:
+  rent-no-fees-filter:
+    proto: http
+    addr: 8000
+    subdomain: rent-no-fees-filter
+    inspect: true
+    web_addr: localhost:4040
+    
+  # Alternative tunnel without subdomain (for backup)
+  rent-no-fees-filter-backup:
+    proto: http
+    addr: 8000
+    inspect: true
+    web_addr: localhost:4041

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки поиска недвижимости</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--tg-theme-button-color, #007bff);
+        }
+
+        .header h1 {
+            color: var(--tg-theme-text-color, #000000);
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: var(--tg-theme-hint-color, #666666);
+            font-size: 14px;
+        }
+
+        .search-mode-selector {
+            display: flex;
+            margin-bottom: 30px;
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .mode-btn.active {
+            background: var(--tg-theme-button-color, #007bff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .form-section {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-section h3 {
+            margin-bottom: 15px;
+            color: var(--tg-theme-text-color, #000000);
+            font-size: 18px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--tg-theme-hint-color, #e0e0e0);
+            border-radius: 8px;
+            font-size: 16px;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color, #007bff);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            background: var(--tg-theme-bg-color, #ffffff);
+            padding: 8px 12px;
+            border-radius: 20px;
+            border: 2px solid var(--tg-theme-hint-color, #e0e0e0);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .checkbox-item:hover {
+            border-color: var(--tg-theme-button-color, #007bff);
+        }
+
+        .checkbox-item.selected {
+            background: var(--tg-theme-button-color, #007bff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border-color: var(--tg-theme-button-color, #007bff);
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            display: none;
+        }
+
+        .range-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .range-group input {
+            flex: 1;
+        }
+
+        .range-group span {
+            color: var(--tg-theme-hint-color, #666666);
+            font-size: 14px;
+        }
+
+        .btn {
+            background: var(--tg-theme-button-color, #007bff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            color: var(--tg-theme-text-color, #000000);
+            border: 2px solid var(--tg-theme-hint-color, #e0e0e0);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: #ffffff;
+        }
+
+        .settings-list {
+            margin-top: 30px;
+        }
+
+        .setting-item {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid var(--tg-theme-button-color, #007bff);
+        }
+
+        .setting-item.inactive {
+            border-left-color: var(--tg-theme-hint-color, #666666);
+            opacity: 0.7;
+        }
+
+        .setting-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .setting-name {
+            font-weight: 600;
+            font-size: 18px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .setting-mode {
+            background: var(--tg-theme-button-color, #007bff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .setting-details {
+            color: var(--tg-theme-hint-color, #666666);
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .setting-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .setting-actions .btn {
+            flex: 1;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--tg-theme-hint-color, #666666);
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #f5c6cb;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #c3e6cb;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .range-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .setting-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏠 Настройки поиска недвижимости</h1>
+            <p>Настройте критерии поиска для автоматической фильтрации объявлений</p>
+        </div>
+
+        <div id="error-message" class="error hidden"></div>
+        <div id="success-message" class="success hidden"></div>
+
+        <!-- Search Mode Selector -->
+        <div class="search-mode-selector">
+            <button class="mode-btn active" data-mode="structured">📋 Структурированный</button>
+            <button class="mode-btn" data-mode="natural_language">💬 Произвольный запрос</button>
+        </div>
+
+        <!-- Settings Form -->
+        <form id="search-settings-form">
+            <div class="form-section">
+                <h3>📝 Основные настройки</h3>
+                
+                <div class="form-group">
+                    <label for="setting-name">Название настройки *</label>
+                    <input type="text" id="setting-name" name="name" required placeholder="Например: Квартиры 2-3 комнаты">
+                </div>
+
+                <div class="form-group">
+                    <label for="confidence-threshold">Порог уверенности (0.0 - 1.0)</label>
+                    <input type="number" id="confidence-threshold" name="confidence_threshold" 
+                           min="0" max="1" step="0.1" value="0.7" placeholder="0.7">
+                </div>
+            </div>
+
+            <!-- Natural Language Section -->
+            <div id="natural-language-section" class="form-section hidden">
+                <h3>💬 Произвольный запрос</h3>
+                <div class="form-group">
+                    <label for="natural-query">Описание того, что искать *</label>
+                    <textarea id="natural-query" name="natural_language_query" 
+                              placeholder="Например: найди объявления о сдаче 4-комнатной квартиры в центре Еревана за 300-500 тысяч драм"></textarea>
+                </div>
+            </div>
+
+            <!-- Structured Search Section -->
+            <div id="structured-section" class="form-section">
+                <h3>🏠 Тип недвижимости</h3>
+                <div class="checkbox-group">
+                    <div class="checkbox-item" data-value="apartment">
+                        <input type="checkbox" name="property_types" value="apartment">
+                        <span>🏢 Квартира</span>
+                    </div>
+                    <div class="checkbox-item" data-value="house">
+                        <input type="checkbox" name="property_types" value="house">
+                        <span>🏡 Дом</span>
+                    </div>
+                    <div class="checkbox-item" data-value="room">
+                        <input type="checkbox" name="property_types" value="room">
+                        <span>🚪 Комната</span>
+                    </div>
+                    <div class="checkbox-item" data-value="hotel_room">
+                        <input type="checkbox" name="property_types" value="hotel_room">
+                        <span>🏨 Гостиничный номер</span>
+                    </div>
+                </div>
+
+                <h3>⏰ Тип аренды</h3>
+                <div class="checkbox-group">
+                    <div class="checkbox-item" data-value="long_term">
+                        <input type="checkbox" name="rental_types" value="long_term">
+                        <span>📅 Долгосрочная</span>
+                    </div>
+                    <div class="checkbox-item" data-value="daily">
+                        <input type="checkbox" name="rental_types" value="daily">
+                        <span>🌅 Посуточная</span>
+                    </div>
+                </div>
+
+                <h3>🏠 Характеристики</h3>
+                <div class="form-group">
+                    <label>Количество комнат</label>
+                    <div class="range-group">
+                        <input type="number" name="min_rooms" placeholder="От" min="1" max="10">
+                        <span>—</span>
+                        <input type="number" name="max_rooms" placeholder="До" min="1" max="10">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Площадь (кв.м)</label>
+                    <div class="range-group">
+                        <input type="number" name="min_area" placeholder="От" min="1" step="0.1">
+                        <span>—</span>
+                        <input type="number" name="max_area" placeholder="До" min="1" step="0.1">
+                    </div>
+                </div>
+
+                <h3>💰 Цена</h3>
+                <div class="form-group">
+                    <label>Цена в AMD</label>
+                    <div class="range-group">
+                        <input type="number" name="min_price_amd" placeholder="От" min="0">
+                        <span>—</span>
+                        <input type="number" name="max_price_amd" placeholder="До" min="0">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Цена в USD</label>
+                    <div class="range-group">
+                        <input type="number" name="min_price_usd" placeholder="От" min="0" step="0.01">
+                        <span>—</span>
+                        <input type="number" name="max_price_usd" placeholder="До" min="0" step="0.01">
+                    </div>
+                </div>
+
+                <h3>📍 Район</h3>
+                <div class="checkbox-group">
+                    <div class="checkbox-item" data-value="Центр">
+                        <input type="checkbox" name="districts" value="Центр">
+                        <span>🏛️ Центр</span>
+                    </div>
+                    <div class="checkbox-item" data-value="Кентрон">
+                        <input type="checkbox" name="districts" value="Кентрон">
+                        <span>🏛️ Кентрон</span>
+                    </div>
+                    <div class="checkbox-item" data-value="Арабкир">
+                        <input type="checkbox" name="districts" value="Арабкир">
+                        <span>🏘️ Арабкир</span>
+                    </div>
+                    <div class="checkbox-item" data-value="Малатия">
+                        <input type="checkbox" name="districts" value="Малатия">
+                        <span>🏘️ Малатия</span>
+                    </div>
+                    <div class="checkbox-item" data-value="Аван">
+                        <input type="checkbox" name="districts" value="Аван">
+                        <span>🏘️ Аван</span>
+                    </div>
+                    <div class="checkbox-item" data-value="Нор-Норк">
+                        <input type="checkbox" name="districts" value="Нор-Норк">
+                        <span>🏘️ Нор-Норк</span>
+                    </div>
+                </div>
+
+                <h3>🔍 Ключевые слова</h3>
+                <div class="form-group">
+                    <label for="keywords">Должны содержать (через запятую)</label>
+                    <input type="text" id="keywords" name="keywords" 
+                           placeholder="сдается, аренда, квартира">
+                </div>
+
+                <div class="form-group">
+                    <label for="exclude-keywords">НЕ должны содержать (через запятую)</label>
+                    <input type="text" id="exclude-keywords" name="exclude_keywords" 
+                           placeholder="продажа, купить">
+                </div>
+            </div>
+
+            <button type="submit" class="btn">💾 Сохранить настройку</button>
+        </form>
+
+        <!-- Settings List -->
+        <div class="settings-list">
+            <h3>📋 Сохраненные настройки</h3>
+            <div id="settings-container">
+                <div class="loading">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Telegram Web App initialization
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Global variables
+        let currentMode = 'structured';
+        let settings = [];
+        let editingSetting = null;
+
+        // DOM elements
+        const modeButtons = document.querySelectorAll('.mode-btn');
+        const naturalLanguageSection = document.getElementById('natural-language-section');
+        const structuredSection = document.getElementById('structured-section');
+        const form = document.getElementById('search-settings-form');
+        const settingsContainer = document.getElementById('settings-container');
+        const errorMessage = document.getElementById('error-message');
+        const successMessage = document.getElementById('success-message');
+
+        // API base URL - будет установлен динамически
+        let API_BASE = window.location.origin + '/api/v1';
+        console.log('API_BASE:', API_BASE);
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSettings();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            // Mode switching
+            modeButtons.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const mode = this.dataset.mode;
+                    switchMode(mode);
+                });
+            });
+
+            // Checkbox groups
+            document.querySelectorAll('.checkbox-group').forEach(group => {
+                group.addEventListener('click', function(e) {
+                    if (e.target.closest('.checkbox-item')) {
+                        const item = e.target.closest('.checkbox-item');
+                        const checkbox = item.querySelector('input[type="checkbox"]');
+                        checkbox.checked = !checkbox.checked;
+                        item.classList.toggle('selected', checkbox.checked);
+                    }
+                });
+            });
+
+            // Form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                saveSetting();
+            });
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            
+            // Update mode buttons
+            modeButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+
+            // Show/hide sections
+            if (mode === 'natural_language') {
+                naturalLanguageSection.classList.remove('hidden');
+                structuredSection.classList.add('hidden');
+            } else {
+                naturalLanguageSection.classList.add('hidden');
+                structuredSection.classList.remove('hidden');
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch(`${API_BASE}/search-settings/`);
+                if (!response.ok) throw new Error('Failed to load settings');
+                
+                settings = await response.json();
+                renderSettings();
+            } catch (error) {
+                showError('Ошибка загрузки настроек: ' + error.message);
+            }
+        }
+
+        function renderSettings() {
+            if (settings.length === 0) {
+                settingsContainer.innerHTML = '<div class="loading">Нет сохраненных настроек</div>';
+                return;
+            }
+
+            const html = settings.map(setting => `
+                <div class="setting-item ${setting.is_active ? '' : 'inactive'}">
+                    <div class="setting-header">
+                        <div class="setting-name">${setting.name}</div>
+                        <div class="setting-mode">${setting.mode === 'natural_language' ? '💬 Произвольный' : '📋 Структурированный'}</div>
+                    </div>
+                    <div class="setting-details">
+                        ${setting.mode === 'natural_language' 
+                            ? `Запрос: "${setting.natural_language_query}"`
+                            : `Типы: ${setting.property_types.join(', ') || 'любые'}, Комнат: ${setting.min_rooms || '?'}-${setting.max_rooms || '?'}`
+                        }
+                        <br>Порог: ${setting.confidence_threshold} | Статус: ${setting.is_active ? 'Активна' : 'Неактивна'}
+                    </div>
+                    <div class="setting-actions">
+                        <button class="btn btn-secondary" onclick="editSetting('${setting.id}')">✏️ Редактировать</button>
+                        <button class="btn ${setting.is_active ? 'btn-danger' : 'btn'}" 
+                                onclick="toggleSetting('${setting.id}', ${!setting.is_active})">
+                            ${setting.is_active ? '⏸️ Деактивировать' : '▶️ Активировать'}
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteSetting('${setting.id}')">🗑️ Удалить</button>
+                    </div>
+                </div>
+            `).join('');
+
+            settingsContainer.innerHTML = html;
+        }
+
+        async function saveSetting() {
+            try {
+                const formData = new FormData(form);
+                const data = {
+                    name: formData.get('name'),
+                    mode: currentMode,
+                    confidence_threshold: parseFloat(formData.get('confidence_threshold')),
+                    is_active: true
+                };
+
+                if (currentMode === 'natural_language') {
+                    data.natural_language_query = formData.get('natural_language_query');
+                } else {
+                    // Collect structured data
+                    data.property_types = Array.from(formData.getAll('property_types'));
+                    data.rental_types = Array.from(formData.getAll('rental_types'));
+                    data.min_rooms = formData.get('min_rooms') ? parseInt(formData.get('min_rooms')) : null;
+                    data.max_rooms = formData.get('max_rooms') ? parseInt(formData.get('max_rooms')) : null;
+                    data.min_area = formData.get('min_area') ? parseFloat(formData.get('min_area')) : null;
+                    data.max_area = formData.get('max_area') ? parseFloat(formData.get('max_area')) : null;
+                    data.min_price_amd = formData.get('min_price_amd') ? parseInt(formData.get('min_price_amd')) : null;
+                    data.max_price_amd = formData.get('max_price_amd') ? parseInt(formData.get('max_price_amd')) : null;
+                    data.min_price_usd = formData.get('min_price_usd') ? parseFloat(formData.get('min_price_usd')) : null;
+                    data.max_price_usd = formData.get('max_price_usd') ? parseFloat(formData.get('max_price_usd')) : null;
+                    data.districts = Array.from(formData.getAll('districts'));
+                    data.keywords = formData.get('keywords') ? formData.get('keywords').split(',').map(k => k.trim()).filter(k => k) : [];
+                    data.exclude_keywords = formData.get('exclude_keywords') ? formData.get('exclude_keywords').split(',').map(k => k.trim()).filter(k => k) : [];
+                }
+
+                const url = editingSetting ? `${API_BASE}/search-settings/${editingSetting}` : `${API_BASE}/search-settings/`;
+                const method = editingSetting ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) throw new Error('Failed to save setting');
+
+                showSuccess(editingSetting ? 'Настройка обновлена!' : 'Настройка сохранена!');
+                form.reset();
+                editingSetting = null;
+                loadSettings();
+            } catch (error) {
+                showError('Ошибка сохранения: ' + error.message);
+            }
+        }
+
+        async function editSetting(settingId) {
+            const setting = settings.find(s => s.id === settingId);
+            if (!setting) return;
+
+            editingSetting = settingId;
+            
+            // Fill form with setting data
+            document.getElementById('setting-name').value = setting.name;
+            document.getElementById('confidence-threshold').value = setting.confidence_threshold;
+            
+            if (setting.mode === 'natural_language') {
+                switchMode('natural_language');
+                document.getElementById('natural-query').value = setting.natural_language_query || '';
+            } else {
+                switchMode('structured');
+                // Fill structured form fields
+                setting.property_types.forEach(type => {
+                    const item = document.querySelector(`[data-value="${type}"]`);
+                    if (item) {
+                        item.querySelector('input[type="checkbox"]').checked = true;
+                        item.classList.add('selected');
+                    }
+                });
+                // ... fill other fields similarly
+            }
+
+            // Scroll to form
+            form.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function toggleSetting(settingId, activate) {
+            try {
+                const endpoint = activate ? 'activate' : 'deactivate';
+                const response = await fetch(`${API_BASE}/search-settings/${settingId}/${endpoint}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Failed to toggle setting');
+
+                showSuccess(activate ? 'Настройка активирована!' : 'Настройка деактивирована!');
+                loadSettings();
+            } catch (error) {
+                showError('Ошибка изменения статуса: ' + error.message);
+            }
+        }
+
+        async function deleteSetting(settingId) {
+            if (!confirm('Вы уверены, что хотите удалить эту настройку?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/search-settings/${settingId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Failed to delete setting');
+
+                showSuccess('Настройка удалена!');
+                loadSettings();
+            } catch (error) {
+                showError('Ошибка удаления: ' + error.message);
+            }
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+            successMessage.classList.add('hidden');
+            setTimeout(() => errorMessage.classList.add('hidden'), 5000);
+        }
+
+        function showSuccess(message) {
+            successMessage.textContent = message;
+            successMessage.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            setTimeout(() => successMessage.classList.add('hidden'), 3000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Filters - Rent No Fees Bot</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .filter-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+        .form-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            flex: 1;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+        }
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-right: 0;
+            white-space: nowrap;
+            min-width: 70px;
+            text-align: center;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .btn-danger {
+            background: #dc3545;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn-success {
+            background: #28a745;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
+        .filters-list {
+            margin-top: 30px;
+        }
+        .filter-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        .filter-header {
+            margin-bottom: 15px;
+        }
+        .filter-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .filter-criteria {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .status-active {
+            color: #28a745;
+            font-weight: 500;
+        }
+        .status-inactive {
+            color: #dc3545;
+            font-weight: 500;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .container {
+                padding: 15px;
+            }
+            .form-row {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .filter-name {
+                font-size: 15px;
+                margin-bottom: 12px;
+            }
+            .filter-actions {
+                justify-content: center;
+                margin-top: 15px;
+            }
+            .btn {
+                flex: 1;
+                min-width: 60px;
+                padding: 10px 8px;
+                font-size: 12px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .filter-actions {
+                flex-direction: column;
+                gap: 5px;
+            }
+            .btn {
+                width: 100%;
+                margin-bottom: 5px;
+            }
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Simple Filters Management</h1>
+
+        <!-- Main Actions -->
+        <div class="main-actions" id="mainActions">
+            <button class="btn btn-success" onclick="showCreateForm()">+ Create New Filter</button>
+        </div>
+
+        <!-- Filter Form (hidden by default) -->
+        <div class="filter-form hidden" id="filterFormContainer">
+            <h3 id="formTitle">Create New Filter</h3>
+            <form id="filterForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="name">Filter Name *</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="description">Description</label>
+                        <input type="text" id="description" name="description">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Property Types</label>
+                        <div class="checkbox-group">
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="apartment" name="property_types" value="apartment">
+                                <label for="apartment">Apartment</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="house" name="property_types" value="house">
+                                <label for="house">House</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="room" name="property_types" value="room">
+                                <label for="room">Room</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="hotel_room" name="property_types" value="hotel_room">
+                                <label for="hotel_room">Hotel Room</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Rental Types</label>
+                        <div class="checkbox-group">
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="long_term" name="rental_types" value="long_term">
+                                <label for="long_term">Long Term</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="daily" name="rental_types" value="daily">
+                                <label for="daily">Daily</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min_rooms">Min Rooms</label>
+                        <input type="number" id="min_rooms" name="min_rooms" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label for="max_rooms">Max Rooms</label>
+                        <input type="number" id="max_rooms" name="max_rooms" min="1" max="10">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min_area">Min Area (sqm)</label>
+                        <input type="number" id="min_area" name="min_area" min="1" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="max_area">Max Area (sqm)</label>
+                        <input type="number" id="max_area" name="max_area" min="1" step="0.1">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min_price_amd">Min Price (AMD)</label>
+                        <input type="number" id="min_price_amd" name="min_price_amd" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="max_price_amd">Max Price (AMD)</label>
+                        <input type="number" id="max_price_amd" name="max_price_amd" min="0">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="min_price_usd">Min Price (USD)</label>
+                        <input type="number" id="min_price_usd" name="min_price_usd" min="0" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="max_price_usd">Max Price (USD)</label>
+                        <input type="number" id="max_price_usd" name="max_price_usd" min="0" step="0.01">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="districts">Districts (comma-separated)</label>
+                        <input type="text" id="districts" name="districts" placeholder="Центр, Арабкир, Малатия">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Features</label>
+                        <div class="checkbox-group">
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_balcony" name="has_balcony">
+                                <label for="has_balcony">Balcony</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_air_conditioning" name="has_air_conditioning">
+                                <label for="has_air_conditioning">Air Conditioning</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_internet" name="has_internet">
+                                <label for="has_internet">Internet</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_furniture" name="has_furniture">
+                                <label for="has_furniture">Furniture</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_parking" name="has_parking">
+                                <label for="has_parking">Parking</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_garden" name="has_garden">
+                                <label for="has_garden">Garden</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="has_pool" name="has_pool">
+                                <label for="has_pool">Pool</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-success">Create Filter</button>
+                <button type="button" class="btn" onclick="cancelEdit()" id="cancelBtn" style="display: none;">Cancel</button>
+            </form>
+        </div>
+        
+        <div class="filters-list">
+            <h3>Existing Filters</h3>
+            <div id="filtersList">
+                <p>Loading filters...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1/simple-filters';
+
+        // Global variable to track editing filter
+        let editingFilterId = null;
+
+        // Load filters on page load
+        document.addEventListener('DOMContentLoaded', loadFilters);
+        
+        // Handle form submission
+        document.getElementById('filterForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveFilter();
+        });
+        
+        async function loadFilters() {
+            try {
+                const response = await fetch(API_BASE);
+                const filters = await response.json();
+                
+                const filtersList = document.getElementById('filtersList');
+                
+                if (filters.length === 0) {
+                    filtersList.innerHTML = '<p>No filters created yet.</p>';
+                    return;
+                }
+                
+                filtersList.innerHTML = filters.map(filter => `
+                    <div class="filter-item">
+                        <div class="filter-header">
+                            <div class="filter-name">${filter.name}</div>
+                        </div>
+                        <div class="filter-criteria">
+                            <strong>Status:</strong> 
+                            <span class="${filter.is_active ? 'status-active' : 'status-inactive'}">
+                                ${filter.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                            ${filter.description ? `<br><strong>Description:</strong> ${filter.description}` : ''}
+                            ${filter.property_types.length > 0 ? `<br><strong>Property Types:</strong> ${filter.property_types.join(', ')}` : ''}
+                            ${filter.rental_types.length > 0 ? `<br><strong>Rental Types:</strong> ${filter.rental_types.join(', ')}` : ''}
+                            ${filter.min_rooms || filter.max_rooms ? `<br><strong>Rooms:</strong> ${filter.min_rooms || 'any'} - ${filter.max_rooms || 'any'}` : ''}
+                            ${filter.min_area || filter.max_area ? `<br><strong>Area:</strong> ${filter.min_area || 'any'} - ${filter.max_area || 'any'} sqm` : ''}
+                            ${filter.min_price_amd || filter.max_price_amd ? `<br><strong>Price (AMD):</strong> ${filter.min_price_amd || 'any'} - ${filter.max_price_amd || 'any'}` : ''}
+                            ${filter.min_price_usd || filter.max_price_usd ? `<br><strong>Price (USD):</strong> ${filter.min_price_usd || 'any'} - ${filter.max_price_usd || 'any'}` : ''}
+                            ${filter.districts.length > 0 ? `<br><strong>Districts:</strong> ${filter.districts.join(', ')}` : ''}
+                        </div>
+                        <div class="filter-actions">
+                            <button class="btn btn-secondary" onclick="editFilter('${filter.id}')">Edit</button>
+                            <button class="btn" onclick="toggleFilter('${filter.id}')">
+                                    ${filter.is_active ? 'Deactivate' : 'Activate'}
+                                </button>
+                            <button class="btn btn-danger" onclick="deleteFilter('${filter.id}')">Delete</button>
+                        </div>
+                    </div>
+                `).join('');
+                
+            } catch (error) {
+                document.getElementById('filtersList').innerHTML = '<p>Error loading filters: ' + error.message + '</p>';
+            }
+        }
+        
+        async function toggleFilter(filterId) {
+            try {
+                const response = await fetch(`${API_BASE}/${filterId}/toggle`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    alert('Filter status updated!');
+                    loadFilters();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error toggling filter: ' + error.message);
+            }
+        }
+        
+        async function deleteFilter(filterId) {
+            if (!confirm('Are you sure you want to delete this filter?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/${filterId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Filter deleted successfully!');
+                    loadFilters();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error deleting filter: ' + error.message);
+            }
+        }
+
+        function showCreateForm() {
+            // Reset form
+            document.getElementById('filterForm').reset();
+            editingFilterId = null;
+
+            // Update form state
+            document.getElementById('formTitle').textContent = 'Create New Filter';
+            document.querySelector('button[type="submit"]').textContent = 'Create Filter';
+            document.getElementById('cancelBtn').style.display = 'inline-block';
+
+            // Show form, hide main actions
+            document.getElementById('filterFormContainer').classList.remove('hidden');
+            document.getElementById('mainActions').classList.add('hidden');
+
+            // Scroll to form
+            document.getElementById('filterFormContainer').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function editFilter(filterId) {
+            try {
+                const response = await fetch(`${API_BASE}/${filterId}`);
+                if (!response.ok) throw new Error('Failed to load filter');
+
+                const filter = await response.json();
+
+                // Fill form with filter data
+                document.getElementById('name').value = filter.name || '';
+                document.getElementById('description').value = filter.description || '';
+                document.getElementById('min_rooms').value = filter.min_rooms || '';
+                document.getElementById('max_rooms').value = filter.max_rooms || '';
+                document.getElementById('min_area').value = filter.min_area || '';
+                document.getElementById('max_area').value = filter.max_area || '';
+                document.getElementById('min_price_amd').value = filter.min_price_amd || '';
+                document.getElementById('max_price_amd').value = filter.max_price_amd || '';
+                document.getElementById('min_price_usd').value = filter.min_price_usd || '';
+                document.getElementById('max_price_usd').value = filter.max_price_usd || '';
+                document.getElementById('districts').value = filter.districts ? filter.districts.join(', ') : '';
+
+                // Set checkboxes for property types
+                document.querySelectorAll('input[name="property_types"]').forEach(checkbox => {
+                    checkbox.checked = filter.property_types && filter.property_types.includes(checkbox.value);
+                });
+
+                // Set checkboxes for rental types
+                document.querySelectorAll('input[name="rental_types"]').forEach(checkbox => {
+                    checkbox.checked = filter.rental_types && filter.rental_types.includes(checkbox.value);
+                });
+
+                // Set feature checkboxes
+                document.getElementById('has_balcony').checked = filter.has_balcony || false;
+                document.getElementById('has_air_conditioning').checked = filter.has_air_conditioning || false;
+                document.getElementById('has_internet').checked = filter.has_internet || false;
+                document.getElementById('has_furniture').checked = filter.has_furniture || false;
+                document.getElementById('has_parking').checked = filter.has_parking || false;
+                document.getElementById('has_garden').checked = filter.has_garden || false;
+                document.getElementById('has_pool').checked = filter.has_pool || false;
+
+                // Update form state
+                editingFilterId = filterId;
+                document.getElementById('formTitle').textContent = 'Edit Filter';
+                document.querySelector('button[type="submit"]').textContent = 'Update Filter';
+                document.getElementById('cancelBtn').style.display = 'inline-block';
+
+                // Show form, hide main actions
+                document.getElementById('filterFormContainer').classList.remove('hidden');
+                document.getElementById('mainActions').classList.add('hidden');
+
+                // Scroll to form
+                document.getElementById('filterFormContainer').scrollIntoView({ behavior: 'smooth' });
+
+            } catch (error) {
+                alert('Error loading filter: ' + error.message);
+            }
+        }
+
+        async function saveFilter() {
+            const formData = new FormData(document.getElementById('filterForm'));
+            const data = {
+                name: formData.get('name'),
+                description: formData.get('description'),
+                property_types: formData.getAll('property_types'),
+                rental_types: formData.getAll('rental_types'),
+                min_rooms: formData.get('min_rooms') ? parseInt(formData.get('min_rooms')) : null,
+                max_rooms: formData.get('max_rooms') ? parseInt(formData.get('max_rooms')) : null,
+                min_area: formData.get('min_area') ? parseFloat(formData.get('min_area')) : null,
+                max_area: formData.get('max_area') ? parseFloat(formData.get('max_area')) : null,
+                min_price_amd: formData.get('min_price_amd') ? parseInt(formData.get('min_price_amd')) : null,
+                max_price_amd: formData.get('max_price_amd') ? parseInt(formData.get('max_price_amd')) : null,
+                min_price_usd: formData.get('min_price_usd') ? parseFloat(formData.get('min_price_usd')) : null,
+                max_price_usd: formData.get('max_price_usd') ? parseFloat(formData.get('max_price_usd')) : null,
+                districts: formData.get('districts') ? formData.get('districts').split(',').map(d => d.trim()).filter(d => d) : [],
+                has_balcony: formData.get('has_balcony') === 'on',
+                has_air_conditioning: formData.get('has_air_conditioning') === 'on',
+                has_internet: formData.get('has_internet') === 'on',
+                has_furniture: formData.get('has_furniture') === 'on',
+                has_parking: formData.get('has_parking') === 'on',
+                has_garden: formData.get('has_garden') === 'on',
+                has_pool: formData.get('has_pool') === 'on'
+            };
+
+            // Remove null values
+            Object.keys(data).forEach(key => {
+                if (data[key] === null || data[key] === undefined || data[key] === '') {
+                    delete data[key];
+                }
+            });
+
+            try {
+                const url = editingFilterId ? `${API_BASE}/${editingFilterId}` : API_BASE;
+                const method = editingFilterId ? 'PATCH' : 'POST';
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    const message = editingFilterId ? 'Filter updated successfully!' : 'Filter created successfully!';
+                    alert(message);
+
+                    // Reset form and return to main view
+                    cancelEdit();
+                    loadFilters();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error saving filter: ' + error.message);
+            }
+        }
+
+        function cancelEdit() {
+            // Reset form
+            document.getElementById('filterForm').reset();
+            editingFilterId = null;
+
+            // Reset form state
+            document.getElementById('formTitle').textContent = 'Create New Filter';
+            document.querySelector('button[type="submit"]').textContent = 'Create Filter';
+            document.getElementById('cancelBtn').style.display = 'none';
+
+            // Hide form, show main actions
+            document.getElementById('filterFormContainer').classList.add('hidden');
+            document.getElementById('mainActions').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
+
+
+
