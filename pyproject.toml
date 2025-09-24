@@ -41,7 +41,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.black]
-line-length = 88
+line-length = 120
 target-version = ['py312']
 
 [tool.isort]
@@ -52,4 +52,17 @@ multi_line_output = 3
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true 
+disallow_untyped_defs = true
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".pytest_cache",
+    "build",
+    "dist"
+] 
