@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -15,6 +15,9 @@ RUN apt-get update \
     curl \
     git \
     jq \
+    procps \
+    psmisc \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ngrok

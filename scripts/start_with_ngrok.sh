@@ -98,3 +98,4 @@ fi
 # Start the application
 log_info "Starting application..."
 exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8001
+

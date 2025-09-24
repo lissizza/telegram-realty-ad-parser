@@ -84,3 +84,4 @@ async def get_web_app_url() -> Optional[str]:
     if tunnel_url:
         return f"{tunnel_url}/api/v1/static/search-settings"
     return None
+

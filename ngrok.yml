@@ -12,11 +12,9 @@ tunnels:
     addr: 8001
     subdomain: rent-no-fees-filter
     inspect: true
-    web_addr: localhost:4040
     
   # Alternative tunnel without subdomain (for backup)
   rent-no-fees-filter-backup:
     proto: http
     addr: 8001
     inspect: true
-    web_addr: localhost:4041

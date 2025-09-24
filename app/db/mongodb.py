@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 
@@ -30,5 +32,10 @@ class MongoDB:
         """Get synchronous database instance"""
         return self.sync_client.get_database()
 
+    @staticmethod
+    def get_current_time():
+        """Get current UTC time"""
+        return datetime.now(timezone.utc)
 
-mongodb = MongoDB() 
+
+mongodb = MongoDB()

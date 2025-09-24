@@ -16,6 +16,7 @@ from app.models.telegram import RealEstateAd
 from app.services.llm_service import LLMService
 from app.services.notification_service import TelegramNotificationService
 from app.services.simple_filter_service import SimpleFilterService
+from app.services.user_service import user_service
 
 logger = logging.getLogger(__name__)
 
@@ -627,10 +628,9 @@ class TelegramService:
         """Forward post to user via bot"""
         try:
             # Get user ID from settings (your Telegram user ID)
-            user_id = settings.TELEGRAM_USER_ID  # We need to add this to config
-
+            user_id = await user_service.get_primary_user_id()
             if not user_id:
-                logger.warning("No user ID configured for forwarding")
+                logger.warning("No authorized users found, skipping notification")
                 return
 
             # Create formatted message with filter information

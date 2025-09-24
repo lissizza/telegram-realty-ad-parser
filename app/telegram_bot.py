@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.db.mongodb import mongodb
 from app.services import get_telegram_service
 from app.services.llm_service import LLMService
+from app.services.user_service import user_service
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +43,36 @@ class TelegramBot:
 
     async def start_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
+        if not update.message or not update.effective_user:
+            return
+
+        user = update.effective_user
+        user_id = user.id
+        username = user.username
+        first_name = user.first_name
+
+        # Auto-authorize the user (silently)
+        await user_service.add_authorized_user(user_id, username, first_name)
+
+        welcome_text = (
+            f"🏠 **Привет, {first_name or 'друг'}!**\n\n"
+            "Я помогу найти идеальную недвижимость для аренды без комиссий.\n\n"
+            "**Что я умею:**\n"
+            "• 🔍 Мониторить каналы с объявлениями\n"
+            "• 🎯 Фильтровать по вашим критериям\n"
+            "• 📱 Присылать только подходящие варианты\n\n"
+            "**Давайте настроим поиск:**\n"
+            "1. Нажмите 'Настроить фильтры' для выбора критериев\n"
+            "2. Я начну искать подходящие объявления\n"
+            "3. Буду присылать вам уведомления\n\n"
+            "Готовы начать? 🚀"
+        )
+
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🏠 Управление фильтрами",
+                    "⚙️ Настроить фильтры",
                     web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📡 Управление каналами",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
                 )
             ],
             [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
@@ -60,68 +80,43 @@ class TelegramBot:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        if update.message:
-            await update.message.reply_text(
-                "🏠 Добро пожаловать в бот поиска недвижимости!\n\n"
-                "Я помогу вам найти подходящие объявления о сдаче недвижимости в Ереване.\n\n"
-                "Выберите действие:",
-                reply_markup=reply_markup,
-            )
+        await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
 
     async def help_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
         if not update.message:
             return
-        help_text = """
-🏠 **Бот поиска недвижимости**
-
-**Основные функции:**
-• 🔍 Автоматический поиск объявлений
-• ⚙️ Настройка критериев поиска
-• 📊 Статистика найденных объявлений
-• 🔔 Уведомления о новых предложениях
-
-**Команды:**
-/start - Главное меню
-/help - Эта справка
-/settings - Настройки поиска
-/stats - Статистика
-/reprocess N [--force] - Обработать N последних сообщений из канала
-/analyze [N] - Анализ структуры канала (по умолчанию 50 сообщений)
-
-**Как использовать:**
-1. Нажмите "Настройки поиска"
-2. Выберите режим поиска:
-   - 📋 Структурированный (по параметрам)
-   - 💬 Произвольный запрос
-3. Настройте критерии
-4. Сохраните настройку
-5. Бот будет автоматически искать подходящие объявления
-
-**Поддерживаемые типы недвижимости:**
-• 🏢 Квартиры
-• 🏡 Дома
-• 🚪 Комнаты
-• 🏨 Гостиничные номера
-
-**Районы Еревана:**
-• Центр, Кентрон
-• Арабкир, Малатия
-• Аван, Нор-Норк
-• И другие
-
-По всем вопросам обращайтесь к администратору.
-        """
+        help_text = (
+            "ℹ️ **Как пользоваться ботом**\n\n"
+            "**1. Настройте фильтры**\n"
+            "• Нажмите 'Настроить фильтры'\n"
+            "• Выберите тип недвижимости, цену, район\n"
+            "• Сохраните настройки\n\n"
+            "**2. Получайте уведомления**\n"
+            "• Я буду искать подходящие объявления\n"
+            "• Присылать их вам в личные сообщения\n"
+            "• Показывать только то, что подходит под ваши критерии\n\n"
+            "**3. Управляйте поиском**\n"
+            "• Изменяйте фильтры в любое время\n"
+            "• Смотрите статистику поиска\n"
+            "• Останавливайте/запускайте поиск\n\n"
+            "**Поддерживаемые типы:**\n"
+            "🏢 Квартиры • 🏡 Дома • 🚪 Комнаты • 🏨 Гостиничные номера\n\n"
+            "**Районы Еревана:**\n"
+            "Центр, Арабкир, Малатия, Аван, Нор-Норк и другие\n\n"
+            "Готовы начать? Нажмите /start! 🚀"
+        )
         await update.message.reply_text(help_text, parse_mode="Markdown")
 
     async def settings_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /settings command"""
         if not update.message:
             return
+
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "🏠 Открыть управление фильтрами",
+                    "⚙️ Настроить фильтры",
                     web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
                 )
             ]
@@ -129,7 +124,13 @@ class TelegramBot:
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
-            "🏠 **Управление фильтрами**\n\nНажмите кнопку ниже, чтобы открыть интерфейс управления фильтрами:",
+            "⚙️ **Настройка поиска**\n\n"
+            "Здесь вы можете настроить критерии поиска:\n"
+            "• Тип недвижимости\n"
+            "• Ценовой диапазон\n"
+            "• Район\n"
+            "• Дополнительные параметры\n\n"
+            "Нажмите кнопку ниже для настройки:",
             reply_markup=reply_markup,
             parse_mode="Markdown",
         )
@@ -201,16 +202,81 @@ class TelegramBot:
         await self.handle_message(update, context)
 
     async def myid_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
-        """Handle /myid command - get user ID"""
+        """Handle /myid command - get user ID and auto-authorize"""
         if not update.message or not update.effective_user:
             return
+
+        user = update.effective_user
+        user_id = user.id
+        username = user.username
+        first_name = user.first_name
+
+        # Auto-authorize the user
+        success = await user_service.add_authorized_user(user_id, username, first_name)
+
+        if success:
+            await update.message.reply_text(
+                f"✅ **Вы успешно авторизованы!**\n\n"
+                f"🆔 **Ваш Telegram User ID:** `{user_id}`\n"
+                f"👤 **Имя:** {first_name or 'Не указано'}\n"
+                f"📝 **Username:** @{username or 'Не указан'}\n\n"
+                f"Теперь вы будете получать уведомления о подходящих объявлениях!",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ **Ошибка авторизации**\n\n"
+                f"🆔 **Ваш Telegram User ID:** `{user_id}`\n\n"
+                f"Попробуйте еще раз или обратитесь к администратору.",
+                parse_mode="Markdown",
+            )
+
+    async def users_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
+        """Handle /users command - manage authorized users"""
+        if not update.message or not update.effective_user:
+            return
+
         user_id = update.effective_user.id
-        await update.message.reply_text(
-            f"🆔 **Ваш Telegram User ID:** `{user_id}`\n\n"
-            f"Добавьте эту строку в ваш .env файл:\n"
-            f"`TELEGRAM_USER_ID={user_id}`",
-            parse_mode="Markdown",
-        )
+
+        # Check if user is authorized (simple check - first user or configured user)
+        authorized_users = await user_service.get_authorized_users()
+        if not authorized_users or user_id not in authorized_users:
+            await update.message.reply_text(
+                "❌ **Доступ запрещен**\n\n"
+                "Эта команда доступна только авторизованным пользователям.\n"
+                "Используйте /myid для авторизации.",
+                parse_mode="Markdown",
+            )
+            return
+
+        try:
+            # Get all authorized users from database
+            db = mongodb.get_database()
+            users_collection = db.users
+            users = await users_collection.find({"is_authorized": True}).to_list(length=None)
+
+            if not users:
+                await update.message.reply_text("📝 **Нет авторизованных пользователей**")
+                return
+
+            # Format users list
+            users_text = "👥 **Авторизованные пользователи:**\n\n"
+            for i, user in enumerate(users, 1):
+                username = user.get("username", "Не указан")
+                first_name = user.get("first_name", "Не указано")
+                user_id = user["user_id"]
+
+                users_text += f"{i}. **{first_name}**\n"
+                users_text += f"   🆔 ID: `{user_id}`\n"
+                users_text += f"   📝 @{username}\n\n"
+
+            await update.message.reply_text(users_text, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error("Error in users command: %s", e)
+            await update.message.reply_text(
+                "❌ **Ошибка**\n\n" "Не удалось получить список пользователей.", parse_mode="Markdown"
+            )
 
     async def reprocess_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /reprocess command"""
@@ -660,7 +726,6 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("settings", self.settings_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("test", self.test_command))
-        self.application.add_handler(CommandHandler("myid", self.myid_command))
         self.application.add_handler(CommandHandler("reprocess", self.reprocess_command))
         self.application.add_handler(CommandHandler("refilter", self.refilter_command))
         self.application.add_handler(CommandHandler("analyze", self.analyze_command))
@@ -674,10 +739,6 @@ class TelegramBot:
             BotCommand("help", "ℹ️ Справка"),
             BotCommand("settings", "⚙️ Настройки поиска"),
             BotCommand("stats", "📊 Статистика"),
-            BotCommand("reprocess", "🔄 Обработать сообщения"),
-            BotCommand("refilter", "🎯 Фильтровать объявления"),
-            BotCommand("analyze", "🔍 Анализ канала"),
-            BotCommand("myid", "🆔 Мой ID"),
         ]
 
         await self.application.bot.set_my_commands(commands)

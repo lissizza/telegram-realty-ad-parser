@@ -107,8 +107,8 @@ app.add_middleware(
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Export telegram_service for use in other modules
-__all__ = ["app", "telegram_service"]
+# Export app for use in other modules
+__all__ = ["app"]
 
 
 @app.get("/")
