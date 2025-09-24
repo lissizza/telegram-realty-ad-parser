@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import List, Optional
-from enum import Enum
 from pydantic import BaseModel, Field
 
 from app.models.telegram import PropertyType, RentalType

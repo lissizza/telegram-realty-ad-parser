@@ -23,12 +23,14 @@
 If you want to work locally without Docker:
 
 1. **Create virtual environment**:
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 2. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -66,6 +68,7 @@ Press `Ctrl+Shift+P` → "Tasks: Run Task" to see available tasks:
 If VS Code shows "Invalid Interpreter":
 
 1. **Check Docker is running**:
+
    ```bash
    docker-compose ps
    ```
@@ -82,6 +85,7 @@ If VS Code shows "Invalid Interpreter":
 If Dev Container fails to start:
 
 1. **Rebuild container**:
+
    ```bash
    docker-compose down
    docker-compose up --build

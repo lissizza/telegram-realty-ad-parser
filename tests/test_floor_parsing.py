@@ -10,18 +10,18 @@ from app.services.llm_service import LLMService
 
 class TestFloorParsing:
     """Test that LLM correctly distinguishes between floor info and room count"""
-    
+
     @pytest.fixture
     def llm_service(self):
         """Create LLMService instance for testing"""
         return LLMService()
-    
+
     @pytest.mark.asyncio
     async def test_floor_info_not_room_count(self, llm_service):
         """Test that '3/8 этаж' is parsed as floor info, not 3 rooms"""
         # Test text with floor info but no room count
         test_text = "Рубен Севака 26\n3/8 этаж\n500.000драм\nБез комиссии"
-        
+
         # Mock the LLM response
         mock_response = {
             "response": '''{
@@ -59,10 +59,10 @@ class TestFloorParsing:
                 "model_name": "gpt-3.5-turbo"
             }
         }
-        
+
         with patch.object(llm_service, '_call_llm', return_value=mock_response):
             with patch.object(llm_service, '_save_real_estate_ad', return_value=None):
-                
+
                 # Execute
                 result = await llm_service.parse_with_llm(
                     text=test_text,
@@ -71,7 +71,7 @@ class TestFloorParsing:
                     incoming_message_id="test_id",
                     topic_id=2629
                 )
-                
+
                 # Verify
                 assert result is not None
                 assert result.rooms_count is None  # Should be null, not 3
@@ -80,13 +80,13 @@ class TestFloorParsing:
                 assert result.price == 500000
                 assert result.currency == "AMD"
                 assert "floor information" in result.additional_notes.lower()
-    
+
     @pytest.mark.asyncio
     async def test_room_count_with_floor_info(self, llm_service):
         """Test that '2к квартира, 5/9 этаж' correctly parses both room count and floor"""
         # Test text with both room count and floor info
         test_text = "Сдаю 2к квартиру, 5/9 этаж, 55кв.м, 45000₽/мес"
-        
+
         # Mock the LLM response
         mock_response = {
             "response": '''{

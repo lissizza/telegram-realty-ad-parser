@@ -36,8 +36,8 @@ class TestLLMParsing:
                     "property_type": PropertyType.APARTMENT,
                     "rental_type": RentalType.LONG_TERM,
                     "rooms_count": 2,
-                    "price_amd": 260000,
-                    "price_usd": None,
+                    "price": 260000,
+                    "currency": "AMD",
                     "address": "Наири Зарьяна 3",
                     "pets_allowed": True,
                     "parsing_confidence": 0.8,  # Should be high confidence
@@ -51,8 +51,8 @@ class TestLLMParsing:
                     "property_type": PropertyType.APARTMENT,
                     "rental_type": RentalType.LONG_TERM,
                     "rooms_count": 1,
-                    "price_amd": 220000,
-                    "price_usd": None,
+                    "price": 220000,
+                    "currency": "AMD",
                     "address": "ул. Хоренаци 47",
                     "parsing_confidence": 0.8,
                 }
@@ -65,8 +65,8 @@ class TestLLMParsing:
                     "property_type": PropertyType.HOUSE,
                     "rental_type": RentalType.LONG_TERM,
                     "rooms_count": 3,
-                    "price_amd": 180000,
-                    "price_usd": None,
+                    "price": 180000,
+                    "currency": "AMD",
                     "district": "Аван",
                     "has_parking": True,
                     "parsing_confidence": 0.7,  # Lower confidence due to formatting
@@ -101,8 +101,8 @@ class TestLLMParsing:
                     "rental_type": RentalType.LONG_TERM,
                     "rooms_count": 2,
                     "area_sqm": 60,
-                    "price_amd": 320000,
-                    "price_usd": None,
+                    "price": 320000,
+                    "currency": "AMD",
                     "address": "Норашен 47/5",
                     "district": "Ачапняк",
                     "city": "Ереван",
@@ -129,7 +129,7 @@ class TestLLMParsing:
                     "property_type": test_case["expected"]["property_type"].value,
                     "rental_type": test_case["expected"]["rental_type"].value,
                     "rooms_count": test_case["expected"]["rooms_count"],
-                    "price": test_case["expected"]["price_amd"],
+                    "price": test_case["expected"]["price"],
                     "currency": "AMD",
                     "address": test_case["expected"].get("address"),
                     "district": test_case["expected"].get("district"),
@@ -160,7 +160,7 @@ class TestLLMParsing:
                 assert result.property_type == test_case["expected"]["property_type"]
                 assert result.rental_type == test_case["expected"]["rental_type"]
                 assert result.rooms_count == test_case["expected"]["rooms_count"]
-                assert result.price_amd == test_case["expected"]["price_amd"]
+                assert result.price == test_case["expected"]["price"]
                 assert result.parsing_confidence >= 0.5, "Confidence should be reasonable"
     
     @pytest.mark.asyncio
@@ -282,14 +282,8 @@ class TestLLMParsing:
                 
                 result = await llm_service.parse_with_llm(text, post_id=1, channel_id=12345)
                 # Check that price was parsed correctly based on currency
-                if expected_currency == "AMD":
-                    assert result.price_amd == expected_price
-                elif expected_currency == "USD":
-                    assert result.price_usd == expected_price
-                else:
-                    # For other currencies, check that price was parsed but not converted
-                    # (since we only convert AMD and USD)
-                    assert result.price_amd is None or result.price_usd is None
+                assert result.price == expected_price
+                assert result.currency == expected_currency
     
     @pytest.mark.asyncio
     async def test_llm_parsing_boolean_features(self, llm_service):

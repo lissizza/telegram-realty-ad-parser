@@ -61,7 +61,8 @@ class TestLLMParsingSimple:
             assert result.property_type == PropertyType.APARTMENT
             assert result.rental_type == RentalType.LONG_TERM
             assert result.rooms_count == 2
-            assert result.price_amd == 260000
+            assert result.price == 260000
+            assert result.currency == "AMD"
             assert result.address == "Наири Зарьяна 3"
             assert result.pets_allowed is True
             assert result.parsing_confidence >= 0.5
@@ -102,7 +103,8 @@ class TestLLMParsingSimple:
             assert result.is_real_estate is True
             assert result.property_type == PropertyType.APARTMENT
             assert result.rooms_count == 1
-            assert result.price_amd == 220000
+            assert result.price == 220000
+            assert result.currency == "AMD"
             assert result.address == "ул. Хоренаци 47"
     
     @pytest.mark.asyncio
@@ -140,7 +142,8 @@ class TestLLMParsingSimple:
             assert result.is_real_estate is True
             assert result.property_type == PropertyType.HOUSE
             assert result.rooms_count == 3
-            assert result.price_amd == 180000
+            assert result.price == 180000
+            assert result.currency == "AMD"
             assert result.district == "Аван"
             assert result.has_parking is True
     
@@ -208,7 +211,8 @@ class TestLLMParsingSimple:
             assert result.property_type == PropertyType.APARTMENT
             assert result.rooms_count == 2
             assert result.area_sqm == 60
-            assert result.price_amd == 320000
+            assert result.price == 320000
+            assert result.currency == "AMD"
             assert result.address == "Норашен 47/5"
             assert result.district == "Ачапняк"
             assert result.city == "Ереван"

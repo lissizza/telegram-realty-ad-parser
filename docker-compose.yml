@@ -2,7 +2,7 @@ services:
   app:
     build: .
     ports:
-      - "8001:8000"
+      - "8001:8001"
     volumes:
       - .:/app
       - ./data:/app/data
@@ -27,6 +27,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     depends_on:
       - mongo
       - redis

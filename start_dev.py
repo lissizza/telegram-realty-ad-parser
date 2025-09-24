@@ -3,17 +3,19 @@
 Development script for starting the application with ngrok
 """
 import asyncio
-import subprocess
-import time
-import requests
 import json
-from pathlib import Path
 import os
+import subprocess
 import sys
+import time
+from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
 
 def check_ngrok_running():
     """Check if ngrok is already running"""
@@ -23,103 +25,57 @@ def check_ngrok_running():
     except:
         return False
 
+
 def get_ngrok_url():
     """Get the current ngrok URL"""
     try:
         response = requests.get("http://localhost:4040/api/tunnels", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            tunnels = data.get('tunnels', [])
-            
+            tunnels = data.get("tunnels", [])
+
             # Find HTTPS tunnel first
             for tunnel in tunnels:
-                if tunnel.get('proto') == 'https' and tunnel.get('public_url'):
-                    return tunnel['public_url']
-            
+                if tunnel.get("proto") == "https" and tunnel.get("public_url"):
+                    return tunnel["public_url"]
+
             # Fallback to HTTP tunnel
             for tunnel in tunnels:
-                if tunnel.get('proto') == 'http' and tunnel.get('public_url'):
-                    return tunnel['public_url']
+                if tunnel.get("proto") == "http" and tunnel.get("public_url"):
+                    return tunnel["public_url"]
     except Exception as e:
         print(f"Error getting ngrok URL: {e}")
-    
+
     return None
 
+
 def start_ngrok():
-    """Start ngrok tunnel with permanent subdomain"""
+    """Start ngrok tunnel using shell script"""
     print("🚀 Starting ngrok tunnel...")
-    
+
     # Check if ngrok is already running
     if check_ngrok_running():
         print("✅ Ngrok is already running")
         return True
-    
+
     try:
-        # Check if config file exists
-        config_file = Path("ngrok.yml")
-        if config_file.exists():
-            print("📝 Using ngrok configuration file")
-            
-            # Set environment variables for ngrok
-            env = os.environ.copy()
-            ngrok_token = os.getenv('NGROK_AUTHTOKEN')
-            if ngrok_token:
-                env['NGROK_AUTHTOKEN'] = ngrok_token
-                print("✅ Using NGROK_AUTHTOKEN from environment")
-            else:
-                print("⚠️  NGROK_AUTHTOKEN not found in environment variables")
-                print("   Make sure it's set in your .env file")
-            
-            process = subprocess.Popen(
-                ["ngrok", "start", "rent-no-fees", "--config", "ngrok.yml"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env
-            )
-        else:
-            # Fallback to command line with subdomain
-            subdomain = "rent-no-fees"  # Change this to your preferred subdomain
-            
-            print(f"📝 Using subdomain: {subdomain}")
-            print("💡 To change subdomain, edit the 'subdomain' variable in start_dev.py")
-            print("💡 Or create ngrok.yml file for more configuration options")
-            
-            # Set environment variables for ngrok
-            env = os.environ.copy()
-            ngrok_token = os.getenv('NGROK_AUTHTOKEN')
-            if ngrok_token:
-                env['NGROK_AUTHTOKEN'] = ngrok_token
-                print("✅ Using NGROK_AUTHTOKEN from environment")
-            else:
-                print("⚠️  NGROK_AUTHTOKEN not found in environment variables")
-                print("   Make sure it's set in your .env file")
-            
-            process = subprocess.Popen(
-                ["ngrok", "http", "8000", "--subdomain", subdomain],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env
-            )
-        
-        # Wait a bit for ngrok to start
-        time.sleep(3)
-        
-        # Check if it's running now
-        if check_ngrok_running():
+        # Use the shell script to start ngrok
+        result = subprocess.run(["./scripts/ngrok.sh", "start"], capture_output=True, text=True, cwd=os.getcwd())
+
+        if result.returncode == 0:
             print("✅ Ngrok started successfully")
             return True
         else:
-            print("❌ Failed to start ngrok")
+            print(f"❌ Failed to start ngrok: {result.stderr}")
             return False
-            
+
     except FileNotFoundError:
-        print("❌ Ngrok not found. Please install ngrok first:")
-        print("   brew install ngrok  # macOS")
-        print("   or download from https://ngrok.com/")
+        print("❌ Ngrok script not found. Please make sure scripts/ngrok.sh exists and is executable")
         return False
     except Exception as e:
         print(f"❌ Error starting ngrok: {e}")
         return False
+
 
 def update_env_file(api_url):
     """Update .env file with the ngrok URL"""
@@ -127,12 +83,12 @@ def update_env_file(api_url):
     if not env_file.exists():
         print("⚠️  .env file not found. Please create it first.")
         return False
-    
+
     try:
         # Read current .env
-        with open(env_file, 'r') as f:
+        with open(env_file, "r") as f:
             lines = f.readlines()
-        
+
         # Update or add API_BASE_URL
         updated = False
         for i, line in enumerate(lines):
@@ -140,26 +96,27 @@ def update_env_file(api_url):
                 lines[i] = f"API_BASE_URL={api_url}\n"
                 updated = True
                 break
-        
+
         if not updated:
             lines.append(f"API_BASE_URL={api_url}\n")
-        
+
         # Write back
-        with open(env_file, 'w') as f:
+        with open(env_file, "w") as f:
             f.writelines(lines)
-        
+
         print(f"✅ Updated .env file with API_BASE_URL={api_url}")
         return True
-        
+
     except Exception as e:
         print(f"❌ Error updating .env file: {e}")
         return False
 
+
 def print_instructions(api_url, web_app_url):
     """Print setup instructions"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🎉 SETUP COMPLETE!")
-    print("="*60)
+    print("=" * 60)
     print(f"📱 API URL: {api_url}")
     print(f"🌐 Web App URL: {web_app_url}")
     print("\n📋 Next steps:")
@@ -172,23 +129,24 @@ def print_instructions(api_url, web_app_url):
     print(f"   {web_app_url}")
     print("\n📊 Monitor ngrok:")
     print("   http://localhost:4040")
-    print("="*60)
+    print("=" * 60)
+
 
 def main():
     """Main function"""
     print("🏠 Telegram Real Estate Bot - Development Setup")
-    print("="*50)
-    
+    print("=" * 50)
+
     # Check if .env exists
     if not Path(".env").exists():
         print("❌ .env file not found. Please create it first.")
         print("   Copy .env.example to .env and fill in your values.")
         sys.exit(1)
-    
+
     # Start ngrok
     if not start_ngrok():
         sys.exit(1)
-    
+
     # Wait for ngrok to be ready
     print("⏳ Waiting for ngrok to be ready...")
     for i in range(10):
@@ -198,31 +156,32 @@ def main():
     else:
         print("❌ Ngrok failed to start properly")
         sys.exit(1)
-    
+
     # Get ngrok URL
     api_url = get_ngrok_url()
     if not api_url:
         print("❌ Could not get ngrok URL")
         sys.exit(1)
-    
+
     web_app_url = f"{api_url}/api/v1/static/search-settings"
-    
+
     # Update .env file
     update_env_file(api_url)
-    
+
     # Print instructions
     print_instructions(api_url, web_app_url)
-    
+
     print("\n🚀 Starting application...")
     print("   Press Ctrl+C to stop")
-    
+
     # Start the application
     try:
-        subprocess.run(["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"])
+        subprocess.run(["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"])
     except KeyboardInterrupt:
         print("\n👋 Stopping application...")
     except Exception as e:
         print(f"❌ Error starting application: {e}")
+
 
 if __name__ == "__main__":
     main()

@@ -38,7 +38,8 @@ class TestLLMIntegration:
         assert result.rental_type == RentalType.LONG_TERM
         assert result.rooms_count == 2
         # LLM might choose either long-term (260k) or monthly (280k) price
-        assert result.price_amd in [260000, 280000]
+        assert result.price in [260000, 280000]
+        assert result.currency == "AMD"
         assert "Наири Зарьяна" in result.address
         assert result.pets_allowed is True
         assert result.parsing_confidence > 0.5
@@ -57,7 +58,8 @@ class TestLLMIntegration:
         assert result.is_real_estate is True
         assert result.property_type == PropertyType.APARTMENT
         assert result.rooms_count == 1  # Studio should be 1 room
-        assert result.price_amd == 220000
+        assert result.price == 220000
+        assert result.currency == "AMD"
         assert "Хоренаци" in result.address
     
     @pytest.mark.asyncio
@@ -72,7 +74,8 @@ class TestLLMIntegration:
         assert result.is_real_estate is True
         assert result.property_type == PropertyType.HOUSE
         assert result.rooms_count == 3
-        assert result.price_amd == 180000
+        assert result.price == 180000
+        assert result.currency == "AMD"
         assert result.district == "Аван"
         assert result.has_parking is True
     
@@ -109,7 +112,8 @@ class TestLLMIntegration:
         assert result.property_type == PropertyType.APARTMENT
         assert result.rooms_count == 2
         assert result.area_sqm == 60
-        assert result.price_amd == 320000
+        assert result.price == 320000
+        assert result.currency == "AMD"
         assert "Норашен" in result.address
         assert result.district == "Ачапняк"
         assert result.city == "Ереван"

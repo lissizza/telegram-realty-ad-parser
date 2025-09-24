@@ -1,38 +1,71 @@
+"""
+Telegram bot with Web App integration for real estate search.
+
+This module provides a Telegram bot that allows users to manage filters,
+view statistics, and interact with the real estate search system through
+a web application interface.
+"""
+
 import logging
+
 import aiohttp
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from app.core.config import settings
+from app.db.mongodb import mongodb
+from app.main import telegram_service
+from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
+
 class TelegramBot:
     """Telegram bot with Web App integration"""
-    
+
     def __init__(self):
         self.application = None
         self.bot_token = settings.TELEGRAM_BOT_TOKEN
-        
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    async def start_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         keyboard = [
-            [InlineKeyboardButton("🏠 Управление фильтрами", web_app={"url": f"{settings.API_BASE_URL}/api/v1/static/simple-filters"})],
-            [InlineKeyboardButton("📡 Управление каналами", web_app={"url": f"{settings.API_BASE_URL}/api/v1/static/channel-management"})],
+            [
+                InlineKeyboardButton(
+                    "🏠 Управление фильтрами",
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📡 Управление каналами",
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
+                )
+            ],
             [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "🏠 Добро пожаловать в бот поиска недвижимости!\n\n"
-            "Я помогу вам найти подходящие объявления о сдаче недвижимости в Ереване.\n\n"
-            "Выберите действие:",
-            reply_markup=reply_markup
-        )
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        if update.message:
+            await update.message.reply_text(
+                "🏠 Добро пожаловать в бот поиска недвижимости!\n\n"
+                "Я помогу вам найти подходящие объявления о сдаче недвижимости в Ереване.\n\n"
+                "Выберите действие:",
+                reply_markup=reply_markup,
+            )
+
+    async def help_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
+        if not update.message:
+            return
         help_text = """
 🏠 **Бот поиска недвижимости**
 
@@ -73,23 +106,29 @@ class TelegramBot:
 
 По всем вопросам обращайтесь к администратору.
         """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-    
-    async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(help_text, parse_mode="Markdown")
+
+    async def settings_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /settings command"""
+        if not update.message:
+            return
         keyboard = [
-            [InlineKeyboardButton("🏠 Открыть управление фильтрами", web_app={"url": f"{settings.API_BASE_URL}/api/v1/static/simple-filters"})]
+            [
+                InlineKeyboardButton(
+                    "🏠 Открыть управление фильтрами",
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                )
+            ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(
-            "🏠 **Управление фильтрами**\n\n"
-            "Нажмите кнопку ниже, чтобы открыть интерфейс управления фильтрами:",
+            "🏠 **Управление фильтрами**\n\nНажмите кнопку ниже, чтобы открыть интерфейс управления фильтрами:",
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
-    
-    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    async def stats_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /stats command"""
         try:
             # Get statistics from API
@@ -97,7 +136,7 @@ class TelegramBot:
                 async with session.get(f"{settings.API_BASE_URL}/api/v1/statistics/") as response:
                     if response.status == 200:
                         stats_data = await response.json()
-                        
+
                         # Format statistics
                         stats_text = f"""📊 **Статистика поиска**
 
@@ -127,42 +166,46 @@ class TelegramBot:
                         """
                     else:
                         stats_text = "❌ Не удалось получить статистику. Попробуйте позже."
-                        
+
         except Exception as e:
-            logger.error(f"Error getting statistics: {e}")
+            logger.error("Error getting statistics: %s", e)
             stats_text = "❌ Ошибка при получении статистики. Попробуйте позже."
-        
+
         # Handle both message and callback query
         if update.message:
-            await update.message.reply_text(stats_text, parse_mode='Markdown')
+            await update.message.reply_text(stats_text, parse_mode="Markdown")
         elif update.callback_query:
-            await update.callback_query.edit_message_text(stats_text, parse_mode='Markdown')
-    
+            await update.callback_query.edit_message_text(stats_text, parse_mode="Markdown")
+
     async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /test command - test message processing"""
+        if not update.message:
+            return
         if not context.args:
             await update.message.reply_text(
                 "Использование: /test <текст объявления>\n\n"
                 "Пример: /test Сдаю 3-комнатную квартиру в центре Еревана, 250000 драм"
             )
             return
-        
+
         test_text = " ".join(context.args)
         await update.message.reply_text(f"🧪 Тестирую обработку: {test_text}")
-        
+
         # Process the test message
         await self.handle_message(update, context)
-    
-    async def myid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    async def myid_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /myid command - get user ID"""
+        if not update.message or not update.effective_user:
+            return
         user_id = update.effective_user.id
         await update.message.reply_text(
             f"🆔 **Ваш Telegram User ID:** `{user_id}`\n\n"
             f"Добавьте эту строку в ваш .env файл:\n"
             f"`TELEGRAM_USER_ID={user_id}`",
-            parse_mode='Markdown'
+            parse_mode="Markdown",
         )
-    
+
     async def reprocess_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /reprocess command"""
         try:
@@ -171,7 +214,7 @@ class TelegramBot:
             if not message:
                 logger.error("No message object available in update")
                 return
-            
+
             # Get number of messages to reprocess and force flag
             if not context.args or len(context.args) < 1 or len(context.args) > 2:
                 # If no arguments provided, show interactive menu
@@ -180,78 +223,71 @@ class TelegramBot:
                     [InlineKeyboardButton("🔄 10 групп", callback_data="reprocess_10")],
                     [InlineKeyboardButton("🔄 20 групп", callback_data="reprocess_20")],
                     [InlineKeyboardButton("🔄 50 групп", callback_data="reprocess_50")],
-                    [InlineKeyboardButton("🔄 Принудительно 10", callback_data="reprocess_force_10")]
+                    [InlineKeyboardButton("🔄 Принудительно 10", callback_data="reprocess_force_10")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                
+
                 await message.reply_text(
-                    "🔄 **Обработка сообщений**\n\n"
-                    "Выберите количество групп сообщений для обработки:",
+                    "🔄 **Обработка сообщений**\n\nВыберите количество групп сообщений для обработки:",
                     reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    parse_mode="Markdown",
                 )
                 return
-            
+
             try:
                 num_messages = int(context.args[0])
                 if num_messages <= 0 or num_messages > 100:
-                    await message.reply_text(
-                        "❌ Количество сообщений должно быть от 1 до 100"
-                    )
+                    await message.reply_text("❌ Количество сообщений должно быть от 1 до 100")
                     return
             except ValueError:
-                await message.reply_text(
-                    "❌ Количество сообщений должно быть числом"
-                )
+                await message.reply_text("❌ Количество сообщений должно быть числом")
                 return
-            
+
             # Check for force flag
             force_reprocess = len(context.args) == 2 and context.args[1] == "--force"
-            
+
             # Send processing started message
-            mode_text = "принудительно переобработать" if force_reprocess else "обработать (пропустить уже обработанные)"
+            mode_text = (
+                "принудительно переобработать" if force_reprocess else "обработать (пропустить уже обработанные)"
+            )
             processing_msg = await message.reply_text(
                 f"🔄 Начинаю {mode_text} {num_messages} последних объявлений из канала...\n"
                 "Это может занять некоторое время."
             )
-            
-            # Import telegram service
-            from app.main import telegram_service
-            logger.info(f"telegram_service: {telegram_service}")
+
+            logger.info("telegram_service: %s", telegram_service)
             if telegram_service is None:
                 logger.error("telegram_service is None!")
-                await processing_msg.edit_text("❌ Сервис обработки сообщений недоступен")
+                if processing_msg and hasattr(processing_msg, "edit_text"):
+                    await processing_msg.edit_text("❌ Сервис обработки сообщений недоступен")
                 return
-            
+
             # Reprocess messages
             result = await telegram_service.reprocess_recent_messages(num_messages, force_reprocess)
-            
+
             # Update message with results
-            await processing_msg.edit_text(
-                f"✅ Обработка завершена!\n\n"
-                f"📊 Результаты:\n"
-                f"• 🔍 Обработано объявлений: {result['total_processed']}\n"
-                f"• ⏭️ Пропущено (уже обработаны): {result['skipped']}\n"
-                f"• 🏠 Найдено объявлений о недвижимости: {result['real_estate_ads']}\n"
-                f"• 🚫 Отфильтровано спама: {result['spam_filtered']}\n"
-                f"• ❌ Не недвижимость: {result['not_real_estate']}\n"
-                f"• 🎯 Соответствует фильтрам: {result['matched_filters']}\n"
-                f"• ✅ Переслано пользователю: {result['forwarded']}\n"
-                f"• ⚠️ Ошибок: {result['errors']}"
-            )
-            
+            if processing_msg and hasattr(processing_msg, "edit_text"):
+                await processing_msg.edit_text(
+                    f"✅ Обработка завершена!\n\n"
+                    f"📊 Результаты:\n"
+                    f"• 🔍 Обработано объявлений: {result['total_processed']}\n"
+                    f"• ⏭️ Пропущено (уже обработаны): {result['skipped']}\n"
+                    f"• 🏠 Найдено объявлений о недвижимости: {result['real_estate_ads']}\n"
+                    f"• 🚫 Отфильтровано спама: {result['spam_filtered']}\n"
+                    f"• ❌ Не недвижимость: {result['not_real_estate']}\n"
+                    f"• 🎯 Соответствует фильтрам: {result['matched_filters']}\n"
+                    f"• ✅ Переслано пользователю: {result['forwarded']}\n"
+                    f"• ⚠️ Ошибок: {result['errors']}"
+                )
+
         except Exception as e:
-            logger.error(f"Error in reprocess command: {e}")
+            logger.error("Error in reprocess command: %s", e)
             # Try to send error message to both message and callback_query
             if message:
-                await message.reply_text(
-                    f"❌ Произошла ошибка при обработке: {str(e)}"
-                )
+                await message.reply_text(f"❌ Произошла ошибка при обработке: {str(e)}")
             elif update.callback_query:
-                await update.callback_query.edit_message_text(
-                    f"❌ Произошла ошибка при обработке: {str(e)}"
-                )
-    
+                await update.callback_query.edit_message_text(f"❌ Произошла ошибка при обработке: {str(e)}")
+
     async def refilter_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /refilter command - filter existing ads without reprocessing"""
         try:
@@ -260,7 +296,7 @@ class TelegramBot:
             if not message:
                 logger.error("No message object available in update")
                 return
-            
+
             # Get number of ads to refilter
             if not context.args or len(context.args) < 1:
                 # If no arguments provided, show interactive menu
@@ -268,19 +304,19 @@ class TelegramBot:
                     [InlineKeyboardButton("🎯 5 объявлений", callback_data="refilter_5")],
                     [InlineKeyboardButton("🎯 10 объявлений", callback_data="refilter_10")],
                     [InlineKeyboardButton("🎯 20 объявлений", callback_data="refilter_20")],
-                    [InlineKeyboardButton("🎯 50 объявлений", callback_data="refilter_50")]
+                    [InlineKeyboardButton("🎯 50 объявлений", callback_data="refilter_50")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                
+
                 await message.reply_text(
                     "🎯 **Фильтрация объявлений**\n\n"
                     "Выберите количество объявлений для фильтрации:\n"
                     "*(Берет уже обработанные объявления из базы и проверяет их по текущим фильтрам)*",
                     reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    parse_mode="Markdown",
                 )
                 return
-            
+
             # Parse arguments
             try:
                 count = int(context.args[0])
@@ -290,179 +326,174 @@ class TelegramBot:
             except ValueError:
                 await message.reply_text("❌ Количество объявлений должно быть числом")
                 return
-            
+
             # No authorization check needed (same as other commands)
-            
+
             # Show processing message
             processing_msg = await message.reply_text(f"🎯 Фильтрую {count} объявлений...")
-            
+
             try:
-                # Import telegram service
-                from app.main import telegram_service
+                # Use telegram service
+
                 if telegram_service is None:
-                    await processing_msg.edit_text("❌ Сервис обработки сообщений недоступен")
+                    if processing_msg and hasattr(processing_msg, "edit_text"):
+                        await processing_msg.edit_text("❌ Сервис обработки сообщений недоступен")
                     return
-                
+
                 # Call refilter method directly
                 result = await telegram_service.refilter_ads(count)
-                
+
                 # Format result message
-                result_text = f"✅ **Фильтрация завершена!**\n\n"
-                result_text += f"📊 **Результаты:**\n"
+                result_text = "✅ **Фильтрация завершена!**\n\n"
+                result_text += "📊 **Результаты:**\n"
                 result_text += f"• 🔍 Проверено объявлений: {result.get('total_checked', 0)}\n"
                 result_text += f"• 🎯 Соответствует фильтрам: {result.get('matched_filters', 0)}\n"
                 result_text += f"• ✅ Переслано пользователю: {result.get('forwarded', 0)}\n"
                 result_text += f"• ⚠️ Ошибок: {result.get('errors', 0)}"
-                
-                await processing_msg.edit_text(result_text, parse_mode='Markdown')
-                            
+
+                if processing_msg and hasattr(processing_msg, "edit_text"):
+                    await processing_msg.edit_text(result_text, parse_mode="Markdown")
+
             except Exception as e:
-                logger.error(f"Error calling refilter: {e}")
-                await processing_msg.edit_text(f"❌ Ошибка при фильтрации: {str(e)}")
-                
+                logger.error("Error calling refilter: %s", e)
+                if processing_msg and hasattr(processing_msg, "edit_text"):
+                    await processing_msg.edit_text(f"❌ Ошибка при фильтрации: {str(e)}")
+
         except Exception as e:
-            logger.error(f"Error in refilter_command: {e}")
+            logger.error("Error in refilter_command: %s", e)
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    f"❌ Произошла ошибка при фильтрации: {str(e)}"
-                )
+                await update.callback_query.edit_message_text(f"❌ Произошла ошибка при фильтрации: {str(e)}")
             else:
-                await message.reply_text(f"❌ Произошла ошибка: {str(e)}")
-    
+                if message:
+                    await message.reply_text(f"❌ Произошла ошибка: {str(e)}")
+
     async def analyze_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /analyze command"""
+        if not update.message:
+            return
         try:
             message = update.message
-            if not message:
-                logger.error("No message object available in update")
-                return
-            
+
             # Get number of messages to analyze (default 50)
             limit = 50
             if context.args and len(context.args) >= 1:
                 try:
                     limit = int(context.args[0])
                     if limit <= 0 or limit > 200:
-                        await message.reply_text(
-                            "❌ Количество сообщений должно быть от 1 до 200"
-                        )
+                        await message.reply_text("❌ Количество сообщений должно быть от 1 до 200")
                         return
                 except ValueError:
-                    await message.reply_text(
-                        "❌ Неверный формат. Используйте: /analyze [количество]"
-                    )
+                    await message.reply_text("❌ Неверный формат. Используйте: /analyze [количество]")
                     return
-            
+
             await message.reply_text(
                 f"🔍 Анализирую структуру канала (последние {limit} сообщений)...\n"
                 "Это может занять некоторое время..."
             )
-            
+
             # Get monitored channels
-            from app.main import telegram_service
-            channels = telegram_service._get_monitored_channels()
-            
-            if not channels:
-                await message.reply_text("❌ Нет настроенных каналов для анализа")
+
+            if telegram_service:
+                channels = telegram_service._get_monitored_channels()  # pylint: disable=protected-access
+
+                if not channels:
+                    await message.reply_text("❌ Нет настроенных каналов для анализа")
+                    return
+
+                # Analyze first channel
+                channel_id = int(channels[0])
+                result = await telegram_service.analyze_channel_structure(channel_id, limit)
+            else:
+                await message.reply_text("❌ Сервис обработки сообщений недоступен")
                 return
-            
-            # Analyze first channel
-            channel_id = int(channels[0])
-            result = await telegram_service.analyze_channel_structure(channel_id, limit)
-            
+
             if result:
                 # Format results
                 response = f"📊 **Анализ канала {channel_id}**\n\n"
-                response += f"📈 **Статистика:**\n"
+                response += "📈 **Статистика:**\n"
                 response += f"• Сообщений без топика (основной канал): {result['no_topic_count']}\n"
                 response += f"• Всего топиков: {len(result['topic_stats'])}\n\n"
-                
-                if result['topic_stats']:
-                    response += f"📋 **Топики:**\n"
-                    for topic_id, count in result['topic_stats'].items():
+
+                if result["topic_stats"]:
+                    response += "📋 **Топики:**\n"
+                    for topic_id, count in result["topic_stats"].items():
                         response += f"• Топик {topic_id}: {count} сообщений\n"
-                
-                response += f"\n🔍 **Примеры сообщений:**\n"
-                for i, msg in enumerate(result['sample_messages'][:5], 1):
+
+                response += "\n🔍 **Примеры сообщений:**\n"
+                for i, msg in enumerate(result["sample_messages"][:5], 1):
                     response += f"\n**{i}.** ID: {msg['id']}\n"
                     response += f"Текст: {msg['text']}...\n"
                     response += f"Reply to: {msg['reply_to']}\n"
                     response += f"Reply to top ID: {msg['reply_to_top_id']}\n"
                     response += f"Дата: {msg['date']}\n"
                     response += "─" * 30
-                
+
                 await message.reply_text(response)
             else:
                 await message.reply_text("❌ Ошибка при анализе канала")
-                
+
         except Exception as e:
-            logger.error(f"Error in analyze command: {e}")
+            logger.error("Error in analyze command: %s", e)
             await message.reply_text(f"❌ Произошла ошибка: {str(e)}")
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    async def handle_message(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle regular messages"""
-        if update.message and update.message.text:
-            try:
-                # Process message as real estate ad
-                from app.services.llm_service import LLMService
-                from app.services.parser_service import ParserService
-                from app.db.mongodb import mongodb
-                
-                llm_service = LLMService()
-                parser_service = ParserService()
-                
-                # Try LLM parsing first
-                real_estate_ad = await llm_service.parse_with_llm(
-                    update.message.text, 
-                    update.message.message_id, 
-                    update.message.chat_id
-                )
-                
-                # Fallback to regex parsing
-                if not real_estate_ad:
-                    real_estate_ad = await parser_service.parse_real_estate_ad(
-                        update.message.text,
-                        update.message.message_id,
-                        update.message.chat_id
-                    )
-                
-                if real_estate_ad:
-                    # Save to database
-                    db = mongodb.get_database()
-                    ad_data = real_estate_ad.dict(exclude={"id"})
-                    result = await db.real_estate_ads.insert_one(ad_data)
-                    real_estate_ad.id = str(result.inserted_id)
-                    
-                    # Send response
-                    response = "🏠 **Объявление обработано!**\n\n"
-                    response += f"**Тип:** {real_estate_ad.property_type}\n"
-                    response += f"**Комнат:** {real_estate_ad.rooms_count}\n"
-                    response += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
-                    response += f"**Цена:** {real_estate_ad.price_amd} драм\n"
-                    response += f"**Район:** {real_estate_ad.district}\n"
-                    response += f"**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n\n"
-                    response += f"**Текст:** {update.message.text[:200]}..."
-                    
-                    await update.message.reply_text(response, parse_mode='Markdown')
-                else:
-                    await update.message.reply_text(
-                        "❌ Не удалось распознать объявление о недвижимости. "
-                        "Попробуйте отправить более подробное описание."
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
+        if not update.message or not update.message.text:
+            return
+
+        try:
+            # Process message as real estate ad
+
+            llm_service = LLMService()
+
+            # Parse with LLM
+            real_estate_ad = await llm_service.parse_with_llm(
+                update.message.text, update.message.message_id, update.message.chat_id
+            )
+
+            if not real_estate_ad:
                 await update.message.reply_text(
-                    "❌ Произошла ошибка при обработке сообщения. Попробуйте позже."
+                    "❌ Не удалось распознать объявление о недвижимости. "
+                    "Попробуйте отправить более подробное описание."
                 )
-    
+                return
+
+            # Save to database
+            db = mongodb.get_database()
+            ad_data = real_estate_ad.dict(exclude={"id"})
+            result = await db.real_estate_ads.insert_one(ad_data)
+            real_estate_ad.id = str(result.inserted_id)
+
+            # Send response
+            response = "🏠 **Объявление обработано!**\n\n"
+            response += f"**Тип:** {real_estate_ad.property_type}\n"
+            response += f"**Комнат:** {real_estate_ad.rooms_count}\n"
+            response += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
+            response += f"**Цена:** {real_estate_ad.price} {real_estate_ad.currency}\n"
+            response += f"**Район:** {real_estate_ad.district}\n"
+            response += f"**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n\n"
+            response += f"**Текст:** {update.message.text[:200]}..."
+
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error("Error processing message: %s", e)
+            await update.message.reply_text("❌ Произошла ошибка при обработке сообщения. Попробуйте позже.")
+
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle callback queries"""
         query = update.callback_query
+        if not query:
+            return
         await query.answer()
-        
-        logger.info(f"DEBUG: Callback received: {query.data}, update.message={update.message}, update.callback_query={update.callback_query}")
-        
+
+        logger.info(
+            "DEBUG: Callback received: %s, update.message=%s, update.callback_query=%s",
+            query.data,
+            update.message,
+            update.callback_query,
+        )
+
         if query.data == "stats":
             await self.stats_command(update, context)
         elif query.data == "help":
@@ -470,26 +501,40 @@ class TelegramBot:
         elif query.data == "open_settings":
             # Open Web App directly
             keyboard = [
-                [InlineKeyboardButton("🏠 Управление фильтрами", web_app={"url": f"{settings.API_BASE_URL}/api/v1/static/simple-filters"})],
-                [InlineKeyboardButton("📡 Управление каналами", web_app={"url": f"{settings.API_BASE_URL}/api/v1/static/channel-management"})],
+                [
+                    InlineKeyboardButton(
+                        "🏠 Управление фильтрами",
+                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "📡 Управление каналами",
+                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
+                    )
+                ],
                 [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await query.message.reply_text(
-                "🏠 **Управление недвижимостью**\n\n"
-                "Выберите действие:",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        elif query.data.startswith("reprocess_"):
+            if query.message:
+                await query.message.reply_text(
+                    "🏠 **Управление недвижимостью**\n\nВыберите действие:",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                )
+        elif query.data and query.data.startswith("reprocess_"):
             await self.handle_reprocess_callback(update, context, query.data)
-        elif query.data.startswith("refilter_"):
+        elif query.data and query.data.startswith("refilter_"):
             await self.handle_refilter_callback(update, context, query.data)
-    
-    async def handle_reprocess_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+
+    async def handle_reprocess_callback(self, update: Update, _: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle reprocess callback queries"""
+        query = update.callback_query
+        if not query:
+            return
+
         try:
             # Parse callback data
             if callback_data == "reprocess_5":
@@ -508,23 +553,26 @@ class TelegramBot:
                 num_messages = 10
                 force = True
             else:
-                await update.callback_query.edit_message_text("❌ Неверная команда")
+                await query.edit_message_text("❌ Неверная команда")
                 return
-            
+
             # Show processing message
-            processing_msg = await update.callback_query.edit_message_text(
+            await query.edit_message_text(
                 f"🔄 Обрабатываю {num_messages} последних сообщений{' (принудительно)' if force else ''}...\n\n"
                 f"⏳ Пожалуйста, подождите..."
             )
-            
-            # Import telegram service
-            from app.main import telegram_service
-            
+
+            # Use telegram service
+
             # Reprocess messages
-            result = await telegram_service.reprocess_recent_messages(num_messages, force)
-            
+            if telegram_service:
+                result = await telegram_service.reprocess_recent_messages(num_messages, force)
+            else:
+                await query.edit_message_text("❌ Сервис обработки сообщений недоступен")
+                return
+
             # Update message with results
-            await processing_msg.edit_text(
+            await query.edit_message_text(
                 f"✅ Обработка завершена!\n\n"
                 f"📊 Результаты:\n"
                 f"• 🔍 Обработано объявлений: {result['total_processed']}\n"
@@ -536,15 +584,17 @@ class TelegramBot:
                 f"• ✅ Переслано пользователю: {result['forwarded']}\n"
                 f"• ⚠️ Ошибок: {result['errors']}"
             )
-            
+
         except Exception as e:
-            logger.error(f"Error in reprocess callback: {e}")
-            await update.callback_query.edit_message_text(
-                f"❌ Произошла ошибка при обработке: {str(e)}"
-            )
-    
-    async def handle_refilter_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+            logger.error("Error in reprocess callback: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка при обработке: {str(e)}")
+
+    async def handle_refilter_callback(self, update: Update, _: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle refilter callback queries"""
+        query = update.callback_query
+        if not query:
+            return
+
         try:
             # Parse callback data
             if callback_data == "refilter_5":
@@ -556,44 +606,42 @@ class TelegramBot:
             elif callback_data == "refilter_50":
                 count = 50
             else:
-                await update.callback_query.answer("❌ Неизвестная команда")
+                await query.answer("❌ Неизвестная команда")
                 return
-            
+
             # No authorization check needed (same as other commands)
-            
+
             # Show processing message
-            await update.callback_query.edit_message_text(f"🎯 Фильтрую {count} объявлений...")
-            
+            await query.edit_message_text(f"🎯 Фильтрую {count} объявлений...")
+
             try:
-                # Import telegram service
-                from app.main import telegram_service
+                # Use telegram service
+
                 if telegram_service is None:
-                    await update.callback_query.edit_message_text("❌ Сервис обработки сообщений недоступен")
+                    await query.edit_message_text("❌ Сервис обработки сообщений недоступен")
                     return
-                
+
                 # Call refilter method directly
                 result = await telegram_service.refilter_ads(count)
-                
+
                 # Format result message
-                result_text = f"✅ **Фильтрация завершена!**\n\n"
-                result_text += f"📊 **Результаты:**\n"
+                result_text = "✅ **Фильтрация завершена!**\n\n"
+                result_text += "📊 **Результаты:**\n"
                 result_text += f"• 🔍 Проверено объявлений: {result.get('total_checked', 0)}\n"
                 result_text += f"• 🎯 Соответствует фильтрам: {result.get('matched_filters', 0)}\n"
                 result_text += f"• ✅ Переслано пользователю: {result.get('forwarded', 0)}\n"
                 result_text += f"• ⚠️ Ошибок: {result.get('errors', 0)}"
-                
-                await update.callback_query.edit_message_text(result_text, parse_mode='Markdown')
-                            
+
+                await query.edit_message_text(result_text, parse_mode="Markdown")
+
             except Exception as e:
-                logger.error(f"Error calling refilter: {e}")
-                await update.callback_query.edit_message_text(f"❌ Ошибка при фильтрации: {str(e)}")
-                
+                logger.error("Error calling refilter: %s", e)
+                await query.edit_message_text(f"❌ Ошибка при фильтрации: {str(e)}")
+
         except Exception as e:
-            logger.error(f"Error in refilter callback: {e}")
-            await update.callback_query.edit_message_text(
-                f"❌ Произошла ошибка при фильтрации: {str(e)}"
-            )
-    
+            logger.error("Error in refilter callback: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка при фильтрации: {str(e)}")
+
     def setup_handlers(self):
         """Setup bot handlers"""
         self.application.add_handler(CommandHandler("start", self.start_command))
@@ -607,11 +655,11 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("analyze", self.analyze_command))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
-    
+
     async def setup_commands_menu(self):
         """Setup bot commands menu"""
         from telegram import BotCommand
-        
+
         commands = [
             BotCommand("start", "🏠 Главное меню"),
             BotCommand("help", "ℹ️ Справка"),
@@ -622,31 +670,40 @@ class TelegramBot:
             BotCommand("analyze", "🔍 Анализ канала"),
             BotCommand("myid", "🆔 Мой ID"),
         ]
-        
+
         await self.application.bot.set_my_commands(commands)
         logger.info("Bot commands menu set up successfully")
-    
+
     async def start_bot(self):
         """Start the bot"""
         try:
-            logger.info(f"Initializing Telegram bot with token: {self.bot_token[:10]}...")
+            if not self.bot_token:
+                raise ValueError("Bot token is not configured")
+            # Type assertion: we know bot_token is not None after the check above
+            logger.info(
+                "Initializing Telegram bot with token: %s...",
+                self.bot_token[:10] if self.bot_token else "None",  # pylint: disable=unsubscriptable-object
+            )  # type: ignore
             self.application = Application.builder().token(self.bot_token).build()
             self.setup_handlers()
-            
+
             logger.info("Starting Telegram bot...")
             await self.application.initialize()
             await self.application.start()
             await self.application.updater.start_polling()
-            
+
             # Setup commands menu
             await self.setup_commands_menu()
-            
+
             logger.info("Telegram bot started successfully")
         except Exception as e:
-            logger.error(f"Failed to start Telegram bot: {e}")
-            logger.error(f"Bot token: {self.bot_token[:10]}...")
+            logger.error("Failed to start Telegram bot: %s", e)
+            logger.error(
+                "Bot token: %s...",
+                self.bot_token[:10] if self.bot_token else "None",  # pylint: disable=unsubscriptable-object
+            )  # type: ignore
             raise
-    
+
     async def stop_bot(self):
         """Stop the bot"""
         if self.application:
@@ -654,6 +711,7 @@ class TelegramBot:
             await self.application.stop()
             await self.application.shutdown()
             logger.info("Telegram bot stopped")
+
 
 # Global bot instance
 telegram_bot = TelegramBot()

@@ -1,0 +1,139 @@
+---
+description: Global coding rules for the project
+globs:
+alwaysApply: true
+---
+
+# Global Coding Rules
+
+## Language Guidelines
+1. **Chat Language**: Use Russian for chat conversations and explanations
+2. **Code Language**: Always use English in code, comments, and documentation
+   - Exception: Content that should be in the user's application language (e.g., user-facing messages, UI text)
+   - Example: `logger.info("User logged in")` ✅
+   - Example: `message = "Пользователь вошел в систему"` ✅ (user-facing)
+
+## Python Code Standards
+1. **Follow PEP8**: Adhere to Python PEP8 style guide
+   - Use 4 spaces for indentation
+   - Maximum line length: 120 characters
+   - Use snake_case for variables and functions
+   - Use PascalCase for classes
+   - Use UPPER_CASE for constants
+
+## Logging Best Practices
+1. **Use Lazy % Formatting**: Always use lazy % formatting in logging functions
+   - ✅ Correct: `logger.info("User %s logged in", username)`
+   - ❌ Wrong: `logger.info(f"User {username} logged in")`
+   - ✅ Correct: `logger.error("Error processing %s: %s", file_path, error)`
+   - ❌ Wrong: `logger.error(f"Error processing {file_path}: {error}")`
+
+## Code Quality
+1. **Type Hints**: Use type hints for function parameters and return values
+2. **Docstrings**: Write docstrings for classes and public methods
+3. **Exception Handling**: Use specific exceptions when possible, avoid bare `except:`
+
+## Import Organization
+1. **Import Placement**: All imports must be at the top of the file
+   - ❌ Wrong: Import inside functions or methods
+   - ✅ Correct: All imports at the beginning of the file
+
+2. **Import Sorting**: Use isort to sort imports according to linter rules
+   - Standard library imports first
+   - Third-party library imports second
+   - Local application imports last
+   - Each group separated by blank line
+
+3. **Import Examples**:
+   ```python
+   # Standard library
+   import json
+   import logging
+   from typing import Any, Dict, Optional
+   
+   # Third-party libraries
+   import httpx
+   from pydantic import BaseModel
+   
+   # Local imports
+   from app.core.config import settings
+   from app.models.user import User
+   ```
+
+4. **Import Commands**:
+   - Sort imports: `python -m isort <file.py>`
+   - Check imports: `python -m isort --check-only <file.py>`
+
+## Technology Stack & Dependencies
+1. **Use Best Practices**: Always choose tools and libraries that follow industry best practices
+   - Prefer well-maintained, actively developed projects
+   - Choose libraries with good documentation and community support
+   - Avoid deprecated or abandoned packages
+
+2. **Version Selection**: Use latest stable versions of libraries
+   - ✅ Correct: Use latest stable release (e.g., `pydantic>=2.0.0`)
+   - ❌ Wrong: Use outdated versions without good reason
+   - Check for security updates regularly
+   - Pin major versions, allow minor/patch updates
+
+3. **Dependency Management**:
+   - Use `requirements.txt` or `pyproject.toml` for dependency management
+   - Pin exact versions in production (`==`)
+   - Use version ranges in development (`>=`)
+   - Regularly update dependencies for security and features
+
+4. **Technology Choices**:
+   - **Web Framework**: FastAPI (modern, async, type-safe)
+   - **Database**: MongoDB with Motor (async driver)
+   - **HTTP Client**: httpx (async, modern alternative to requests)
+   - **Validation**: Pydantic v2 (type validation, serialization)
+   - **Testing**: pytest with async support
+   - **Code Quality**: pylint, isort, mypy
+   - **Logging**: Python standard logging with lazy formatting
+
+5. **Avoid Anti-patterns**:
+   - Don't use deprecated libraries (e.g., `requests` instead of `httpx`)
+   - Avoid mixing sync/async code unnecessarily
+   - Don't use outdated Python features (e.g., `%` formatting instead of f-strings for logging)
+   - Avoid hardcoded values, use configuration management
+
+## Code Comments & Documentation
+1. **Minimal Commenting**: Avoid excessive commenting, only add comments when necessary for understanding
+   - ❌ Wrong: `# save to database` before `await self.save_to_database(data)`
+   - ✅ Correct: `# Handle edge case when user data is incomplete` before complex logic
+   - ❌ Wrong: `# increment counter` before `counter += 1`
+   - ✅ Correct: `# Validate business rules before processing payment` before complex validation
+
+2. **Self-Documenting Code**: Write code that explains itself through good naming
+   - Use descriptive names for classes, methods, functions, and variables
+   - Choose names that clearly indicate purpose and behavior
+   - Avoid abbreviations and unclear acronyms
+
+3. **When to Comment**:
+   - Complex business logic that isn't obvious
+   - Workarounds for external library bugs
+   - Performance optimizations with non-obvious reasons
+   - API integration details that aren't clear from the code
+   - Security considerations
+
+4. **Comment Examples**:
+   ```python
+   # ❌ Bad - obvious from code
+   # save user data
+   await save_user_data(user)
+   
+   # ✅ Good - explains why, not what
+   # Retry failed requests with exponential backoff to handle rate limiting
+   await retry_with_backoff(send_request, max_retries=3)
+   
+   # ✅ Good - explains business logic
+   # Skip validation for admin users to allow bulk operations
+   if not user.is_admin:
+       validate_user_data(data)
+   ```
+
+5. **Docstring Guidelines**:
+   - Write docstrings for public classes and methods
+   - Focus on what the function does, not how it does it
+   - Include parameter types and return values
+   - Mention side effects or exceptions that might be raised

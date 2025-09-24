@@ -77,7 +77,8 @@ class TestLLMDatabaseOperations:
             assert result.property_type == PropertyType.APARTMENT
             assert result.rental_type == RentalType.LONG_TERM
             assert result.rooms_count == 2
-            assert result.price_amd == 280000
+            assert result.price == 280000
+            assert result.currency == "AMD"
             assert result.address == "Наири Зарьяна 3"
             assert result.pets_allowed is True
             assert "Multiple prices mentioned" in result.additional_notes
@@ -93,7 +94,8 @@ class TestLLMDatabaseOperations:
             assert saved_ad.original_channel_id == 12345
             assert saved_ad.property_type == PropertyType.APARTMENT
             assert saved_ad.rooms_count == 2
-            assert saved_ad.price_amd == 280000
+            assert saved_ad.price == 280000
+            assert saved_ad.currency == "AMD"
             assert saved_ad.pets_allowed is True
             assert "Multiple prices mentioned" in saved_ad.additional_notes
     
@@ -211,7 +213,8 @@ class TestLLMDatabaseOperations:
             assert result is not None
             assert result.rooms_count == 2
             assert result.area_sqm == 60
-            assert result.price_amd == 320000
+            assert result.price == 320000
+            assert result.currency == "AMD"
             assert result.address == "Норашен 47/5"
             assert result.district == "Ачапняк"
             assert result.city == "Ереван"
@@ -227,7 +230,8 @@ class TestLLMDatabaseOperations:
             saved_ad = mock_save_ad.call_args[0][0]
             assert saved_ad.rooms_count == 2
             assert saved_ad.area_sqm == 60
-            assert saved_ad.price_amd == 320000
+            assert saved_ad.price == 320000
+            assert saved_ad.currency == "AMD"
             assert saved_ad.address == "Норашен 47/5"
             assert saved_ad.district == "Ачапняк"
             assert saved_ad.city == "Ереван"
@@ -277,7 +281,8 @@ class TestLLMDatabaseOperations:
             assert result is not None
             assert result.property_type == PropertyType.HOUSE
             assert result.rooms_count == 3
-            assert result.price_amd == 180000
+            assert result.price == 180000
+            assert result.currency == "AMD"
             assert result.district == "Аван"
             assert result.has_parking is True
             
@@ -286,7 +291,8 @@ class TestLLMDatabaseOperations:
             saved_ad = mock_save_ad.call_args[0][0]
             assert saved_ad.property_type == PropertyType.HOUSE
             assert saved_ad.rooms_count == 3
-            assert saved_ad.price_amd == 180000
+            assert saved_ad.price == 180000
+            assert saved_ad.currency == "AMD"
             assert saved_ad.district == "Аван"
             assert saved_ad.has_parking is True
             assert "Phone number included" in saved_ad.additional_notes

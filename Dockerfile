@@ -11,10 +11,14 @@ ENV POETRY_CACHE_DIR='/var/cache/pypoetry'
 # Install system dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
-        curl \
-        git \
+    build-essential \
+    curl \
+    git \
+    jq \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ngrok
+RUN curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar -xz -C /usr/local/bin
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
@@ -36,7 +40,7 @@ COPY . .
 RUN mkdir -p /app/data
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8001
 
-# Run the application
-CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+# Run the application with ngrok
+CMD ["./scripts/start_with_ngrok.sh"] 
