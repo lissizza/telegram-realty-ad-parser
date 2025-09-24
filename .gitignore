@@ -33,6 +33,7 @@ venv.bak/
 # IDE
 .vscode/
 .idea/
+.devcontainer/
 *.swp
 *.swo
 *~

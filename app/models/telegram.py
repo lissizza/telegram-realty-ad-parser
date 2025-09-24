@@ -78,7 +78,6 @@ class RealEstateAd(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-
 class ForwardedPost(BaseModel):
     """Model for forwarded posts"""
     id: Optional[str] = None
