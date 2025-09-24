@@ -26,15 +26,13 @@ class NotificationService(ABC):
 class TelegramNotificationService(NotificationService):
     """Telegram implementation of notification service"""
 
-    def __init__(self) -> None:
-        self._bot: Optional[Any] = None
+    def __init__(self, bot: Optional[Any] = None) -> None:
+        self._bot = bot
 
     async def _get_bot(self) -> Any:
-        """Lazy initialization of bot to avoid circular imports"""
+        """Get bot instance"""
         if self._bot is None:
-            from app.telegram_bot import telegram_bot
-
-            self._bot = telegram_bot
+            raise RuntimeError("Bot not initialized")
         return self._bot
 
     async def send_message(

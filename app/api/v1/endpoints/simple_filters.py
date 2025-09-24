@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -92,8 +93,6 @@ async def update_simple_filter(
     filter_id: str, filter_data: SimpleFilterUpdate, service: SimpleFilterService = Depends(get_simple_filter_service)
 ):
     """Update an existing simple filter"""
-    import logging
-
     logger = logging.getLogger(__name__)
 
     try:

@@ -14,7 +14,7 @@ from app.models.incoming_message import IncomingMessage
 from app.models.simple_filter import SimpleFilter
 from app.models.telegram import RealEstateAd
 from app.services.llm_service import LLMService
-from app.services.notification_service import notification_service
+from app.services.notification_service import TelegramNotificationService
 from app.services.simple_filter_service import SimpleFilterService
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,12 @@ class TelegramService:
         self.client: Optional[TelegramClient] = None
         self.llm_service = LLMService()
         self.simple_filter_service = SimpleFilterService()
+        self.notification_service: Optional[TelegramNotificationService] = None
         self.is_monitoring = False
+
+    def set_notification_service(self, bot: Any) -> None:
+        """Set the notification service with bot instance"""
+        self.notification_service = TelegramNotificationService(bot)
 
     async def start_monitoring(self) -> None:
         """Start monitoring Telegram channels"""
@@ -636,9 +641,10 @@ class TelegramService:
             keyboard = [[InlineKeyboardButton("⚙️ Настроить фильтры", callback_data="open_settings")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await notification_service.send_message(
-                user_id=user_id, message=formatted_message, parse_mode="Markdown", reply_markup=reply_markup
-            )
+            if self.notification_service:
+                await self.notification_service.send_message(
+                    user_id=user_id, message=formatted_message, parse_mode="Markdown", reply_markup=reply_markup
+                )
 
             # Save forwarding record
             db = mongodb.get_database()

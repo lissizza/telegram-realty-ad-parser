@@ -9,7 +9,13 @@ a web application interface.
 import logging
 
 import aiohttp
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+    WebAppInfo,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -21,7 +27,7 @@ from telegram.ext import (
 
 from app.core.config import settings
 from app.db.mongodb import mongodb
-from app.main import telegram_service
+from app.services import get_telegram_service
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -255,6 +261,7 @@ class TelegramBot:
                 "Это может занять некоторое время."
             )
 
+            telegram_service = get_telegram_service()
             logger.info("telegram_service: %s", telegram_service)
             if telegram_service is None:
                 logger.error("telegram_service is None!")
@@ -334,6 +341,7 @@ class TelegramBot:
 
             try:
                 # Use telegram service
+                telegram_service = get_telegram_service()
 
                 if telegram_service is None:
                     if processing_msg and hasattr(processing_msg, "edit_text"):
@@ -392,6 +400,7 @@ class TelegramBot:
             )
 
             # Get monitored channels
+            telegram_service = get_telegram_service()
 
             if telegram_service:
                 channels = telegram_service._get_monitored_channels()  # pylint: disable=protected-access
@@ -565,6 +574,7 @@ class TelegramBot:
             # Use telegram service
 
             # Reprocess messages
+            telegram_service = get_telegram_service()
             if telegram_service:
                 result = await telegram_service.reprocess_recent_messages(num_messages, force)
             else:
@@ -617,6 +627,7 @@ class TelegramBot:
             try:
                 # Use telegram service
 
+                telegram_service = get_telegram_service()
                 if telegram_service is None:
                     await query.edit_message_text("❌ Сервис обработки сообщений недоступен")
                     return
@@ -658,8 +669,6 @@ class TelegramBot:
 
     async def setup_commands_menu(self):
         """Setup bot commands menu"""
-        from telegram import BotCommand
-
         commands = [
             BotCommand("start", "🏠 Главное меню"),
             BotCommand("help", "ℹ️ Справка"),
