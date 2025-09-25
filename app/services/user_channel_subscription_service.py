@@ -5,12 +5,15 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from bson import ObjectId
+from telethon import TelegramClient
 
+from app.core.config import settings
 from app.db.mongodb import mongodb
 from app.models.user_channel_subscription import (
     UserChannelSubscriptionCreate,
     UserChannelSubscriptionResponse,
 )
+from app.services.channel_resolver_service import ChannelResolverService
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,34 @@ class UserChannelSubscriptionService:
 
     def __init__(self):
         pass  # Don't initialize db here, get it when needed
+    
+    async def _get_telegram_client(self) -> Optional[TelegramClient]:
+        """Get Telegram client instance"""
+        try:
+            from app.services.telegram_service import TelegramService
+            telegram_service = TelegramService()
+            if telegram_service.client:
+                return telegram_service.client
+            else:
+                logger.error("Telegram client not available")
+                return None
+        except Exception as e:
+            logger.error("Error getting Telegram client: %s", e)
+            return None
+    
+    async def _resolve_channel_info(self, channel_input: str) -> Optional[dict]:
+        """Resolve channel information using Telegram API"""
+        try:
+            client = await self._get_telegram_client()
+            if not client:
+                logger.error("Cannot resolve channel info: Telegram client not available")
+                return None
+            
+            resolver = ChannelResolverService(client)
+            return await resolver.resolve_channel_info(channel_input)
+        except Exception as e:
+            logger.error("Error resolving channel info for '%s': %s", channel_input, e)
+            return None
     
     async def _get_db(self):
         """Get database instance"""
@@ -120,28 +151,27 @@ class UserChannelSubscriptionService:
             logger.info("Creating subscription for user %s, input: %s", 
                        subscription_data.user_id, subscription_data.channel_input)
             
-            # Parse channel input
-            channel_username, topic_id, channel_link, channel_id, topic_title = self._parse_channel_input(subscription_data.channel_input)
-            logger.info("Parsed channel: username=%s, topic_id=%s, link=%s, channel_id=%s", 
-                       channel_username, topic_id, channel_link, channel_id)
-            
-            # Use provided topic_id or parsed one
-            final_topic_id = subscription_data.topic_id or topic_id
-            
-            # Validate that we have at least channel_username or channel_id
-            if not channel_username and not channel_id:
-                logger.error("Could not parse channel from input: %s", subscription_data.channel_input)
+            # Resolve channel information using Telegram API
+            channel_info = await self._resolve_channel_info(subscription_data.channel_input)
+            if not channel_info:
+                logger.error("Could not resolve channel info from input: %s", subscription_data.channel_input)
                 return None
+            
+            # Use provided topic_id or resolved one
+            final_topic_id = subscription_data.topic_id or channel_info.get('topic_id')
+            
+            # Extract resolved information
+            channel_id = channel_info['channel_id']
+            channel_username = channel_info['channel_username']
+            channel_title = channel_info['channel_title']
+            channel_link = channel_info['channel_link']
             
             # Check if subscription already exists
             db = await self._get_db()
-            query = {"user_id": subscription_data.user_id}
-            
-            # Build query based on what we have
-            if channel_id:
-                query["channel_id"] = channel_id
-            else:
-                query["channel_username"] = channel_username
+            query = {
+                "user_id": subscription_data.user_id,
+                "channel_id": str(channel_id)
+            }
             
             if final_topic_id:
                 query["topic_id"] = final_topic_id
@@ -156,12 +186,12 @@ class UserChannelSubscriptionService:
             # Create subscription document
             subscription_doc = {
                 "user_id": subscription_data.user_id,
-                "channel_id": channel_id,  # Store actual Telegram channel ID if available
-                "channel_username": channel_username,  # Store username if available
-                "channel_title": channel_username or f"Channel {channel_id}",  # Will be updated when we get channel info
+                "channel_id": str(channel_id),  # Store as string for consistency
+                "channel_username": channel_username,
+                "channel_title": channel_title,
                 "channel_link": channel_link,
                 "topic_id": final_topic_id,
-                "topic_title": topic_title,
+                "topic_title": None,  # Will be updated when we get topic info
                 "is_active": True,
                 "monitor_all_topics": subscription_data.monitor_all_topics,
                 "monitored_topics": subscription_data.monitored_topics,
