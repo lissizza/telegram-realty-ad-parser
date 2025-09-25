@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ class LLMCost(BaseModel):
     total_tokens: int = Field(..., description="Total tokens used")
     cost_usd: float = Field(..., description="Cost in USD")
     model_name: str = Field(..., description="LLM model used")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     class Config:
         populate_by_name = True

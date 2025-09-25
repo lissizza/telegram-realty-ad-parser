@@ -3,33 +3,22 @@
 Script to get subchannel ID for "Сдача жилья без комиссии"
 """
 import asyncio
-import os
-import sys
-from pathlib import Path
-
-# Add the app directory to Python path
-sys.path.insert(0, str(Path(__file__).parent / "app"))
-
-from core.config import settings
-from services.telegram_service import TelegramService
+from telethon import TelegramClient
+from app.core.config import settings
 
 async def get_subchannel_id():
     """Get subchannel ID"""
     
     print(f"Current monitored channel: {settings.TELEGRAM_MONITORED_CHANNELS}")
     
-    # Create telegram service
-    service = TelegramService()
+    # Create client
+    client = TelegramClient(
+        settings.TELEGRAM_SESSION_NAME,
+        settings.TELEGRAM_API_ID,
+        settings.TELEGRAM_API_HASH
+    )
     
     try:
-        # Initialize client
-        from telethon import TelegramClient
-        client = TelegramClient(
-            settings.TELEGRAM_SESSION_NAME,
-            settings.TELEGRAM_API_ID,
-            settings.TELEGRAM_API_HASH
-        )
-        
         await client.start(phone=settings.TELEGRAM_PHONE)
         print("Connected to Telegram!")
         
@@ -86,6 +75,3 @@ async def get_subchannel_id():
 
 if __name__ == "__main__":
     asyncio.run(get_subchannel_id())
-
-
-

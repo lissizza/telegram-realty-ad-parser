@@ -146,7 +146,7 @@ async def update_simple_filter(
         current_filter = await service.get_filter_by_id(filter_id)
         logger.info("Current filter state: %s", current_filter)
 
-        # Remove None values
+        # Include only non-None values to avoid overwriting required fields
         update_data = {k: v for k, v in filter_data.dict().items() if v is not None}
         logger.info("Update data: %s", update_data)
 

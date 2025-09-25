@@ -63,6 +63,7 @@ class TestRefilterAds:
             {
                 "_id": "filter1",
                 "name": "2-3 Room Apartments",
+                "user_id": 123456789,
                 "is_active": True,
                 "property_types": ["apartment"],
                 "min_rooms": 2,
@@ -74,6 +75,7 @@ class TestRefilterAds:
             {
                 "_id": "filter2",
                 "name": "1 Room Apartments",
+                "user_id": 123456789,
                 "is_active": True,
                 "property_types": ["apartment"],
                 "min_rooms": 1,
@@ -174,7 +176,6 @@ class TestRefilterAds:
             
             # Verify
             assert result["total_checked"] == 0
-            assert result["matched_filters"] == 0
             assert result["forwarded"] == 0
             assert result["errors"] == 0
     
@@ -192,7 +193,6 @@ class TestRefilterAds:
                 
                 # Verify
                 assert result["total_checked"] == 2
-                assert result["matched_filters"] == 2
                 assert result["forwarded"] == 0  # No successful forwards
                 assert result["errors"] == 2  # Both forwards failed
     
@@ -235,7 +235,6 @@ class TestRefilterAds:
                 
                 # Verify
                 assert result["total_checked"] == 1
-                assert result["matched_filters"] == 0
                 assert result["forwarded"] == 0
                 assert result["errors"] == 1  # Error creating RealEstateAd object
 

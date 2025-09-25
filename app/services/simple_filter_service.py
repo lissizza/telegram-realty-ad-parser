@@ -14,12 +14,17 @@ from bson import ObjectId
 from app.db.mongodb import mongodb
 from app.models.simple_filter import SimpleFilter
 from app.models.telegram import RealEstateAd
+from app.models.price_filter import PriceFilter
+from app.services.price_filter_service import PriceFilterService
 
 logger = logging.getLogger(__name__)
 
 
 class SimpleFilterService:
     """Service for managing simple filters"""
+    
+    def __init__(self):
+        self.price_filter_service = PriceFilterService()
 
     async def get_active_filters(self, user_id: Optional[int] = None) -> List[SimpleFilter]:
         """Get all active simple filters, optionally filtered by user"""
@@ -83,7 +88,21 @@ class SimpleFilterService:
                     filter_obj.min_rooms,
                     filter_obj.max_rooms,
                 )
-                if filter_obj.matches(real_estate_ad):
+                
+                # Get price filters for this filter
+                price_filters = []
+                if filter_obj.id:
+                    price_filters = await self.price_filter_service.get_price_filters_by_filter_id(str(filter_obj.id))
+                
+                # Check if filter matches (including price filters)
+                if price_filters:
+                    # Use new method that includes price filter matching
+                    matches = filter_obj.matches_with_price_filters(real_estate_ad, price_filters)
+                else:
+                    # Use old method for filters without price filters
+                    matches = filter_obj.matches(real_estate_ad)
+                
+                if matches:
                     filter_id = str(filter_obj.id) if filter_obj.id else "unknown"
                     matching_filters.append(filter_id)
                     filter_details[filter_id] = {"name": filter_obj.name, "description": filter_obj.description}
@@ -131,11 +150,32 @@ class SimpleFilterService:
             logger.info("Updating filter %s with data: %s", filter_id, filter_data)
             db = mongodb.get_database()
 
+            # Separate fields to set and unset
+            set_data = {}
+            unset_data = {}
+            
+            # Fields that cannot be unset (required fields)
+            required_fields = {'name', 'user_id', 'is_active'}
+            
+            for key, value in filter_data.items():
+                if value is None and key not in required_fields:
+                    unset_data[key] = ""
+                else:
+                    set_data[key] = value
+            
             # Add updated_at timestamp
-            filter_data["updated_at"] = datetime.now(timezone.utc)
-            logger.info("Filter data with timestamp: %s", filter_data)
+            set_data["updated_at"] = datetime.now(timezone.utc)
+            logger.info("Set data: %s", set_data)
+            logger.info("Unset data: %s", unset_data)
+            
+            # Build update operation
+            update_operation = {}
+            if set_data:
+                update_operation["$set"] = set_data
+            if unset_data:
+                update_operation["$unset"] = unset_data
 
-            result = await db.simple_filters.update_one({"_id": ObjectId(filter_id)}, {"$set": filter_data})
+            result = await db.simple_filters.update_one({"_id": ObjectId(filter_id)}, update_operation)
 
             logger.info("Update result: modified_count=%s", result.modified_count)
             success = bool(result.modified_count > 0)

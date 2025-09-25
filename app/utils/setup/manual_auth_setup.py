@@ -3,23 +3,11 @@
 Простой скрипт для настройки аутентификации Telegram
 """
 import asyncio
-import os
-import sys
-
-# Добавляем путь к приложению
-sys.path.append('/app')
+from telethon import TelegramClient
+from app.core.config import settings
 
 async def main():
     print("🔐 Настройка аутентификации Telegram API...")
-    
-    # Импортируем после добавления пути
-    try:
-        from telethon import TelegramClient
-        from app.core.config import settings
-    except ImportError as e:
-        print(f"❌ Ошибка импорта: {e}")
-        print("Установите telethon: pip install telethon")
-        return
     
     print(f"📱 API ID: {settings.TELEGRAM_API_ID}")
     print(f"📞 Phone: {settings.TELEGRAM_PHONE}")
@@ -67,6 +55,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-

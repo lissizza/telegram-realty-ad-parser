@@ -40,6 +40,3 @@ async def get_user_id():
 
 if __name__ == "__main__":
     asyncio.run(get_user_id())
-
-
-

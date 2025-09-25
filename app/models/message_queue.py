@@ -2,7 +2,7 @@
 Models for message processing queue
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from pydantic import BaseModel, Field
@@ -41,8 +41,8 @@ class QueuedMessage(BaseModel):
     parsed_data: Optional[Dict[str, Any]] = None
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProcessingResult(BaseModel):
@@ -53,3 +53,7 @@ class ProcessingResult(BaseModel):
     errors: List[str] = []
     llm_cost: Optional[float] = None
     processing_time_seconds: Optional[float] = None
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -158,6 +158,182 @@
             font-weight: 500;
         }
 
+        .price-filters-section {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+
+        .price-filter-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .price-filter-info {
+            flex: 1;
+        }
+
+        .price-filter-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-info {
+            background-color: #17a2b8;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn-info:hover {
+            background-color: #138496;
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        .btn-danger-sm {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .btn-danger-sm:hover {
+            background-color: #c82333;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .form-row-3 {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .form-group-3 {
+            flex: 1;
+        }
+
+        /* Price Filters Section */
+        .form-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f8f9fa;
+        }
+
+        .form-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .form-section-header label {
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+        }
+
+        .price-filter-row {
+            display: flex;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+
+        .price-filter-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .price-filter-row .form-group label {
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+
+        .price-filter-row .form-group input,
+        .price-filter-row .form-group select {
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+
+        .price-filter-remove {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            height: fit-content;
+        }
+
+        .price-filter-remove:hover {
+            background: #c82333;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
         /* Mobile responsiveness */
         @media (max-width: 768px) {
             body {
@@ -292,21 +468,14 @@
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="min_price">Min Price</label>
-                        <input type="number" id="min_price" name="min_price" min="0">
+                <!-- Price Filters Section -->
+                <div class="form-section">
+                    <div class="form-section-header">
+                        <label>Price Filters</label>
+                        <button type="button" class="btn btn-sm btn-success" onclick="addPriceFilterRow()">+ Add Price Filter</button>
                     </div>
-                    <div class="form-group">
-                        <label for="max_price">Max Price</label>
-                        <input type="number" id="max_price" name="max_price" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label for="price_currency">Currency</label>
-                        <select id="price_currency" name="price_currency">
-                            <option value="AMD">AMD</option>
-                            <option value="USD">USD</option>
-                        </select>
+                    <div id="priceFiltersContainer">
+                        <!-- Price filter rows will be added here -->
                     </div>
                 </div>
 
@@ -367,13 +536,10 @@
         </div>
     </div>
 
+
     <script>
-        // Detect if we're running on mobile (Telegram WebApp) and use ngrok URL
-        const isMobile = window.navigator.userAgent.includes('Mobile') ||
-            (window.Telegram && window.Telegram.WebApp);
-        const API_BASE = isMobile ?
-            'https://perissodactylous-subintegumentary-lianne.ngrok-free.app/api/v1/simple-filters' :
-            'http://localhost:8001/api/v1/simple-filters';
+        // Use current origin + API path
+        const API_BASE = window.location.origin + '/api/v1/simple-filters';
 
         // Get user ID from Telegram WebApp
         let currentUserId = null;
@@ -402,10 +568,10 @@
 
         console.log('Final currentUserId:', currentUserId);
         console.log('API_BASE:', API_BASE);
-        console.log('isMobile:', isMobile);
 
         // Global variable to track editing filter
         let editingFilterId = null;
+        let priceFilterCounter = 0;
 
         // Load filters on page load
         document.addEventListener('DOMContentLoaded', loadFilters);
@@ -418,11 +584,11 @@
 
         async function loadFilters() {
             try {
-                const url = `${API_BASE}?user_id=${currentUserId}`;
+                const url = `${API_BASE}/?user_id=${currentUserId}`;
                 console.log('Loading filters from URL:', url);
                 console.log('Current user ID:', currentUserId);
 
-                const response = await fetch(url);
+            const response = await fetch(url);
                 console.log('Response status:', response.status);
                 console.log('Response ok:', response.ok);
 
@@ -455,7 +621,9 @@
                             ${filter.rental_types.length > 0 ? `<br><strong>Rental Types:</strong> ${filter.rental_types.join(', ')}` : ''}
                             ${filter.min_rooms || filter.max_rooms ? `<br><strong>Rooms:</strong> ${filter.min_rooms || 'any'} - ${filter.max_rooms || 'any'}` : ''}
                             ${filter.min_area || filter.max_area ? `<br><strong>Area:</strong> ${filter.min_area || 'any'} - ${filter.max_area || 'any'} sqm` : ''}
-                            ${filter.min_price || filter.max_price ? `<br><strong>Price (${filter.price_currency || 'AMD'}):</strong> ${filter.min_price || 'any'} - ${filter.max_price || 'any'}` : ''}
+                            <div id="price-filters-${filter.id}">
+                                <!-- Price filters will be loaded here -->
+                            </div>
                             ${filter.districts.length > 0 ? `<br><strong>Districts:</strong> ${filter.districts.join(', ')}` : ''}
                         </div>
                         <div class="filter-actions">
@@ -468,13 +636,16 @@
                     </div>
                 `).join('');
 
+                // Load price filters for all filters
+                await loadPriceFiltersForAllFilters();
+
             } catch (error) {
                 console.error('Error loading filters:', error);
                 document.getElementById('filtersList').innerHTML = `
                     <div style="color: red; padding: 20px; border: 1px solid red; border-radius: 4px;">
                         <h3>Error loading filters</h3>
                         <p><strong>Error:</strong> ${error.message}</p>
-                        <p><strong>URL:</strong> ${API_BASE}?user_id=${currentUserId}</p>
+                        <p><strong>URL:</strong> ${API_BASE}/?user_id=${currentUserId}</p>
                         <p><strong>User ID:</strong> ${currentUserId}</p>
                         <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
                         <p>Check browser console (F12) for more details.</p>
@@ -485,9 +656,9 @@
 
         async function toggleFilter(filterId) {
             try {
-                const response = await fetch(`${API_BASE}/${filterId}/toggle`, {
-                    method: 'POST'
-                });
+            const response = await fetch(`${API_BASE}/${filterId}/toggle`, {
+                method: 'POST'
+            });
 
                 if (response.ok) {
                     alert('Filter status updated!');
@@ -527,6 +698,7 @@
             // Reset form
             document.getElementById('filterForm').reset();
             editingFilterId = null;
+            clearPriceFilters();
 
             // Update form state
             document.getElementById('formTitle').textContent = 'Create New Filter';
@@ -555,10 +727,10 @@
                 document.getElementById('max_rooms').value = filter.max_rooms || '';
                 document.getElementById('min_area').value = filter.min_area || '';
                 document.getElementById('max_area').value = filter.max_area || '';
-                document.getElementById('min_price').value = filter.min_price || '';
-                document.getElementById('max_price').value = filter.max_price || '';
-                document.getElementById('price_currency').value = filter.price_currency || 'AMD';
                 document.getElementById('districts').value = filter.districts ? filter.districts.join(', ') : '';
+
+                // Load price filters
+                await loadPriceFiltersForEdit(filterId);
 
                 // Set checkboxes for property types
                 document.querySelectorAll('input[name="property_types"]').forEach(checkbox => {
@@ -608,9 +780,6 @@
                 max_rooms: formData.get('max_rooms') ? parseInt(formData.get('max_rooms')) : null,
                 min_area: formData.get('min_area') ? parseFloat(formData.get('min_area')) : null,
                 max_area: formData.get('max_area') ? parseFloat(formData.get('max_area')) : null,
-                min_price: formData.get('min_price') ? parseInt(formData.get('min_price')) : null,
-                max_price: formData.get('max_price') ? parseInt(formData.get('max_price')) : null,
-                price_currency: formData.get('price_currency') || 'AMD',
                 districts: formData.get('districts') ? formData.get('districts').split(',').map(d => d.trim()).filter(d => d) : [],
                 has_balcony: formData.get('has_balcony') === 'on',
                 has_air_conditioning: formData.get('has_air_conditioning') === 'on',
@@ -634,7 +803,7 @@
             });
 
             try {
-                const url = editingFilterId ? `${API_BASE}/${editingFilterId}` : API_BASE;
+                const url = editingFilterId ? `${API_BASE}/${editingFilterId}` : `${API_BASE}/`;
                 const method = editingFilterId ? 'PATCH' : 'POST';
 
                 const response = await fetch(url, {
@@ -646,6 +815,12 @@
                 });
 
                 if (response.ok) {
+                    const result = await response.json();
+                    const filterId = editingFilterId || result.id;
+                    
+                    // Save price filters
+                    await savePriceFilters(filterId);
+                    
                     const message = editingFilterId ? 'Filter updated successfully!' : 'Filter created successfully!';
                     alert(message);
 
@@ -665,6 +840,7 @@
             // Reset form
             document.getElementById('filterForm').reset();
             editingFilterId = null;
+            clearPriceFilters();
 
             // Reset form state
             document.getElementById('formTitle').textContent = 'Create New Filter';
@@ -674,6 +850,190 @@
             // Hide form, show main actions
             document.getElementById('filterFormContainer').classList.add('hidden');
             document.getElementById('mainActions').classList.remove('hidden');
+        }
+
+        // Price Filter Management Functions
+        function addPriceFilterRow() {
+            const container = document.getElementById('priceFiltersContainer');
+            const rowId = `priceFilter_${priceFilterCounter++}`;
+            
+            const row = document.createElement('div');
+            row.className = 'price-filter-row';
+            row.id = rowId;
+            
+            row.innerHTML = `
+                <div class="form-group">
+                    <label>Min Price</label>
+                    <input type="number" name="price_min_${rowId}" step="0.01" min="0" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Max Price</label>
+                    <input type="number" name="price_max_${rowId}" step="0.01" min="0" placeholder="No limit">
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="price_currency_${rowId}">
+                        <option value="AMD">AMD</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                    </select>
+                </div>
+                <button type="button" class="price-filter-remove" onclick="removePriceFilterRow('${rowId}')">×</button>
+            `;
+            
+            container.appendChild(row);
+        }
+
+        function removePriceFilterRow(rowId) {
+            const row = document.getElementById(rowId);
+            if (row) {
+                row.remove();
+            }
+        }
+
+        function clearPriceFilters() {
+            const container = document.getElementById('priceFiltersContainer');
+            container.innerHTML = '';
+            priceFilterCounter = 0;
+        }
+
+        function loadPriceFiltersIntoForm(priceFilters) {
+            clearPriceFilters();
+            
+            if (priceFilters && priceFilters.length > 0) {
+                priceFilters.forEach(pf => {
+                    addPriceFilterRow();
+                    const rowId = `priceFilter_${priceFilterCounter - 1}`;
+                    
+                    const minInput = document.querySelector(`input[name="price_min_${rowId}"]`);
+                    const maxInput = document.querySelector(`input[name="price_max_${rowId}"]`);
+                    const currencySelect = document.querySelector(`select[name="price_currency_${rowId}"]`);
+                    
+                    if (minInput) minInput.value = pf.min_price || '';
+                    if (maxInput) maxInput.value = pf.max_price || '';
+                    if (currencySelect) currencySelect.value = pf.currency || 'AMD';
+                });
+            }
+        }
+
+        function getPriceFiltersFromForm() {
+            const priceFilters = [];
+            const rows = document.querySelectorAll('.price-filter-row');
+            
+            rows.forEach(row => {
+                const minInput = row.querySelector('input[name^="price_min_"]');
+                const maxInput = row.querySelector('input[name^="price_max_"]');
+                const currencySelect = row.querySelector('select[name^="price_currency_"]');
+                
+                if (minInput && currencySelect) {
+                    const minPrice = minInput.value && minInput.value.trim() !== '' ? parseFloat(minInput.value) : null;
+                    const maxPrice = maxInput.value && maxInput.value.trim() !== '' ? parseFloat(maxInput.value) : null;
+                    const currency = currencySelect.value;
+                    
+                    // Only add if at least min or max price is specified and both are valid numbers
+                    if ((minPrice !== null && !isNaN(minPrice)) || (maxPrice !== null && !isNaN(maxPrice))) {
+                        // Validate that min_price is not greater than max_price
+                        if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) {
+                            console.warn('Skipping price filter: min_price > max_price');
+                            return;
+                        }
+                        
+                        priceFilters.push({
+                            min_price: minPrice,
+                            max_price: maxPrice,
+                            currency: currency
+                        });
+                    }
+                }
+            });
+            
+            return priceFilters;
+        }
+
+        async function loadPriceFiltersForEdit(filterId) {
+            try {
+                const response = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/filters/${filterId}/price-filters`);
+                const priceFilters = await response.json();
+                loadPriceFiltersIntoForm(priceFilters);
+            } catch (error) {
+                console.error('Error loading price filters for edit:', error);
+                clearPriceFilters();
+            }
+        }
+
+        async function savePriceFilters(filterId) {
+            try {
+                console.log('Saving price filters for filter:', filterId);
+                
+                // First, delete existing price filters
+                const existingResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/filters/${filterId}/price-filters`);
+                if (existingResponse.ok) {
+                    const existingFilters = await existingResponse.json();
+                    console.log('Found existing price filters:', existingFilters.length);
+                    
+                    for (const pf of existingFilters) {
+                        console.log('Deleting price filter:', pf.id);
+                        const deleteResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters/${pf.id}`, {
+                            method: 'DELETE'
+                        });
+                        if (!deleteResponse.ok) {
+                            console.error('Failed to delete price filter:', pf.id);
+                        }
+                    }
+                }
+
+                // Then create new ones
+                const priceFilters = getPriceFiltersFromForm();
+                console.log('Creating new price filters:', priceFilters.length);
+                
+                for (const pf of priceFilters) {
+                    console.log('Creating price filter:', pf);
+                    const createResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            filter_id: filterId,
+                            min_price: pf.min_price,
+                            max_price: pf.max_price,
+                            currency: pf.currency,
+                            is_active: true
+                        })
+                    });
+                    
+                    if (!createResponse.ok) {
+                        console.error('Failed to create price filter:', pf);
+                    }
+                }
+            } catch (error) {
+                console.error('Error saving price filters:', error);
+            }
+        }
+
+        // Load price filters for each filter when main filters are loaded
+        async function loadPriceFiltersForAllFilters() {
+            const filterItems = document.querySelectorAll('.filter-item');
+            for (const item of filterItems) {
+                const filterId = item.querySelector('[onclick*="editFilter"]').onclick.toString().match(/'([^']+)'/)[1];
+                const priceFiltersDiv = document.getElementById(`price-filters-${filterId}`);
+                
+                try {
+                    const response = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/filters/${filterId}/price-filters`);
+                    const priceFilters = await response.json();
+                    
+                    if (priceFilters.length > 0) {
+                        priceFiltersDiv.innerHTML = `
+                            <br><strong>Price Filters:</strong> 
+                            ${priceFilters.map(pf => 
+                                `${pf.currency}: ${pf.min_price ? pf.min_price.toLocaleString() : 'any'} - ${pf.max_price ? pf.max_price.toLocaleString() : 'any'}`
+                            ).join(', ')}
+                        `;
+                    }
+                } catch (error) {
+                    console.error(`Error loading price filters for filter ${filterId}:`, error);
+                }
+            }
         }
     </script>
 </body>

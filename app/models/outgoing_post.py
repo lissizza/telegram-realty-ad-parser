@@ -2,7 +2,7 @@
 Model for outgoing posts that we send to users/channels
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,13 @@ class OutgoingPost(BaseModel):
     real_estate_ad_id: Optional[str] = None  # Link to original RealEstateAd
     incoming_message_id: Optional[int] = None  # Link to original IncomingMessage
     
+    # Channel and topic information
+    channel_id: Optional[int] = None  # Original channel ID
+    channel_username: Optional[str] = None  # Channel username
+    channel_title: Optional[str] = None  # Channel title
+    topic_id: Optional[int] = None  # Topic ID if from topic-based channel
+    topic_title: Optional[str] = None  # Topic title
+    
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

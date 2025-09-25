@@ -2,7 +2,7 @@
 Model for incoming messages from Telegram channels
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
@@ -47,5 +47,5 @@ class IncomingMessage(BaseModel):
     forwarded_to: Optional[str] = None  # User ID who received the forward
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

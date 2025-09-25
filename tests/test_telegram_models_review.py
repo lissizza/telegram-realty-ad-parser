@@ -156,8 +156,9 @@ class TestTelegramModelsReview:
         assert not hasattr(incoming, 'sent_to')
         
         assert hasattr(outgoing, 'sent_to')
-        assert hasattr(outgoing, 'status')
-        assert not hasattr(outgoing, 'channel_id')
+        assert hasattr(outgoing, 'sent_to_type')
+        # OutgoingPost now has channel_id for tracking original channel
+        assert hasattr(outgoing, 'channel_id')
         
         assert hasattr(real_estate, 'property_type')
         assert hasattr(real_estate, 'price')

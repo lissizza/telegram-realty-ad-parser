@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from telethon import TelegramClient
 from telethon.tl.types import Channel, Chat, User
+from telethon import functions
 
 from app.core.config import settings
 
@@ -53,7 +54,18 @@ class ChannelResolverService:
             if user_input.startswith("https://t.me/"):
                 return await self._resolve_from_url(user_input)
             elif user_input.startswith("@"):
-                return await self._resolve_from_username(user_input[1:])
+                # Check if it has topic: @channel_username/topic_id
+                if "/" in user_input:
+                    username_part = user_input[1:].split("/")[0]
+                    topic_id = int(user_input.split("/")[1])
+                    logger.info("Parsing @username/topic: username='%s', topic_id=%s", username_part, topic_id)
+                    channel_info = await self._resolve_from_username(username_part)
+                    if channel_info:
+                        channel_info['topic_id'] = topic_id
+                        logger.info("Successfully resolved channel with topic: %s", channel_info)
+                    return channel_info
+                else:
+                    return await self._resolve_from_username(user_input[1:])
             elif ":" in user_input and user_input.startswith("-"):
                 # Channel ID with topic: -1001827102719:2629
                 return await self._resolve_from_channel_id_with_topic(user_input)
@@ -188,7 +200,7 @@ class ChannelResolverService:
 
     async def get_topic_title(self, channel_id: int, topic_id: int) -> Optional[str]:
         """
-        Get topic title by channel ID and topic ID
+        Get topic title by channel ID and topic ID using Telegram API
         
         Args:
             channel_id: Channel ID
@@ -198,39 +210,28 @@ class ChannelResolverService:
             Topic title or None if not found
         """
         try:
-            # Get channel entity
-            channel = await self.client.get_entity(channel_id)
+            logger.info("Getting topic title for channel %s, topic %s", channel_id, topic_id)
             
-            if not isinstance(channel, Channel):
-                logger.warning("Entity %s is not a channel", channel_id)
-                return None
+            # Get channel input entity
+            channel = await self.client.get_input_entity(channel_id)
             
-            # Check if channel has topics (is a supergroup with topics enabled)
-            if not getattr(channel, 'forum', False):
-                logger.warning("Channel %s does not have topics enabled", channel_id)
-                return None
+            # Use Telegram API to get forum topic by ID
+            result = await self.client(functions.channels.GetForumTopicsByIDRequest(
+                channel=channel,
+                topics=[topic_id],
+            ))
             
-            # Get channel full info to access topics
-            full_channel = await self.client.get_entity(channel)
-            
-            # Try to get topic info
-            try:
-                # This is a simplified approach - in practice, getting topic titles
-                # requires more complex API calls that might not be available in all cases
-                logger.info("Attempting to get topic title for channel %s, topic %s", channel_id, topic_id)
-                
-                # For now, return a generic title based on topic ID
-                # In a real implementation, you would need to use specific Telegram API methods
-                # to get the actual topic titles
-                return f"Topic {topic_id}"
-                
-            except Exception as e:
-                logger.warning("Could not get topic title for %s:%s: %s", channel_id, topic_id, e)
-                return f"Topic {topic_id}"
+            if result.topics:
+                topic_title = result.topics[0].title
+                logger.info("Found topic title: %s", topic_title)
+                return topic_title
+            else:
+                logger.warning("Topic %s not found in channel %s", topic_id, channel_id)
+                return f"Топик {topic_id}"
                 
         except Exception as e:
             logger.error("Error getting topic title for channel %s, topic %s: %s", channel_id, topic_id, e)
-            return None
+            return f"Топик {topic_id}"
 
     def validate_channel_input(self, user_input: str) -> bool:
         """

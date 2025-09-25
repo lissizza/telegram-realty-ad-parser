@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -23,8 +23,8 @@ class UserChannelSubscription(BaseModel):
     monitored_topics: List[int] = Field(default_factory=list)  # Specific topic IDs to monitor
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     class Config:
         json_encoders = {
@@ -54,21 +54,17 @@ class UserChannelSubscriptionResponse(BaseModel):
     is_active: bool
     monitor_all_topics: bool
     monitored_topics: List[int]
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
     
     @classmethod
     def from_db_doc(cls, doc: dict):
         """Create response model from database document"""
-        # Convert datetime to string
-        created_at = doc.get("created_at")
-        if hasattr(created_at, "isoformat"):
-            created_at = created_at.isoformat()
-        
-        updated_at = doc.get("updated_at")
-        if hasattr(updated_at, "isoformat"):
-            updated_at = updated_at.isoformat()
-        
         return cls(
             id=str(doc["_id"]),
             user_id=doc["user_id"],
@@ -81,8 +77,8 @@ class UserChannelSubscriptionResponse(BaseModel):
             is_active=doc.get("is_active", True),
             monitor_all_topics=doc.get("monitor_all_topics", False),
             monitored_topics=doc.get("monitored_topics", []),
-            created_at=created_at or "",
-            updated_at=updated_at or ""
+            created_at=doc.get("created_at", datetime.now(UTC)),
+            updated_at=doc.get("updated_at", datetime.now(UTC))
         )
 
 

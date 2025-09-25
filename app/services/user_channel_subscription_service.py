@@ -27,9 +27,9 @@ class UserChannelSubscriptionService:
     async def _get_telegram_client(self) -> Optional[TelegramClient]:
         """Get Telegram client instance"""
         try:
-            from app.services.telegram_service import TelegramService
-            telegram_service = TelegramService()
-            if telegram_service.client:
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            if telegram_service and telegram_service.client:
                 return telegram_service.client
             else:
                 logger.error("Telegram client not available")
@@ -47,10 +47,22 @@ class UserChannelSubscriptionService:
                 return None
             
             resolver = ChannelResolverService(client)
-            return await resolver.resolve_channel_info(channel_input)
+            result = await resolver.resolve_channel_info(channel_input)
+            
+            if not result:
+                raise ValueError("Канал не найден. Проверьте правильность названия канала или ссылки.")
+            
+            return result
+        except ValueError as ve:
+            # Перебрасываем ValueError с понятным сообщением
+            raise ve
         except Exception as e:
             logger.error("Error resolving channel info for '%s': %s", channel_input, e)
-            return None
+            # Проверяем тип ошибки для более понятного сообщения
+            if "Nobody is using this username" in str(e) or "USERNAME_NOT_OCCUPIED" in str(e):
+                raise ValueError("Канал не найден. Проверьте правильность названия канала или ссылки.")
+            else:
+                raise ValueError("Не удалось найти канал. Проверьте правильность данных.")
     
     async def _get_topic_title(self, channel_id: int, topic_id: int) -> Optional[str]:
         """Get topic title by channel ID and topic ID"""
@@ -200,7 +212,7 @@ class UserChannelSubscriptionService:
             if existing:
                 logger.warning("Subscription already exists for user %s, query: %s", 
                              subscription_data.user_id, query)
-                return str(existing["_id"])
+                raise ValueError(f"У вас уже есть подписка на канал {channel_title}")
             
             # Create subscription document
             subscription_doc = {
@@ -223,8 +235,22 @@ class UserChannelSubscriptionService:
             logger.info("Created subscription for user %s, channel_id=%s, channel_username=%s, id: %s", 
                        subscription_data.user_id, channel_id, channel_username, result.inserted_id)
             
+            # Update topic cache if topic_id is present
+            if final_topic_id:
+                try:
+                    from app.services import get_telegram_service
+                    telegram_service = get_telegram_service()
+                    if telegram_service:
+                        await telegram_service.update_topic_cache(channel_id, final_topic_id)
+                        logger.info("Updated topic cache for channel %s, topic %s", channel_id, final_topic_id)
+                except Exception as e:
+                    logger.warning("Failed to update topic cache: %s", e)
+            
             return str(result.inserted_id)
             
+        except ValueError as ve:
+            # Re-raise ValueError so it can be caught by the API endpoint
+            raise ve
         except Exception as e:
             logger.error("Error creating subscription: %s", e, exc_info=True)
             return None
@@ -358,3 +384,4 @@ class UserChannelSubscriptionService:
         except Exception as e:
             logger.error("Error getting all active subscriptions: %s", e, exc_info=True)
             return []
+

@@ -61,6 +61,3 @@ async def setup_telegram_auth():
 
 if __name__ == "__main__":
     asyncio.run(setup_telegram_auth())
-
-
-

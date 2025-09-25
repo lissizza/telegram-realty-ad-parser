@@ -2,7 +2,7 @@
 Model for tracking matches between users, filters, and real estate ads
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class UserFilterMatch(BaseModel):
     real_estate_ad_id: str  # RealEstateAd ID
     
     # Match metadata
-    matched_at: datetime = Field(default_factory=datetime.utcnow)
+    matched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     forwarded: bool = False  # Whether this match was forwarded to user
     forwarded_at: Optional[datetime] = None
     
@@ -25,8 +25,8 @@ class UserFilterMatch(BaseModel):
     error_message: Optional[str] = None
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 

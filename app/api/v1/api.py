@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     posts, channels, telegram, real_estate, search_settings, static, ngrok, 
-    statistics, simple_filters, user_filter_matches, user_channel_subscriptions
+    statistics, simple_filters, user_filter_matches, user_channel_subscriptions, config, price_filters
 )
 
 api_router = APIRouter()
@@ -38,4 +38,10 @@ api_router.include_router(
 )
 api_router.include_router(
     user_channel_subscriptions.router, prefix="/user-channel-subscriptions", tags=["user-channel-subscriptions"]
+)
+api_router.include_router(
+    config.router, prefix="/config", tags=["config"]
+)
+api_router.include_router(
+    price_filters.router, prefix="/price-filters", tags=["price-filters"]
 )

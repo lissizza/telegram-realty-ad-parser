@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
 
 from bson import ObjectId
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,10 +29,97 @@ class TelegramService:
         self.simple_filter_service = SimpleFilterService()
         self.notification_service: Optional[TelegramNotificationService] = None
         self.is_monitoring = False
+        # Cache for topic top_message IDs to reduce API calls
+        self.topic_cache: Dict[tuple[int, int], int] = {}  # (channel_id, topic_id) -> top_message_id
 
     def set_notification_service(self, bot: Any) -> None:
         """Set the notification service with bot instance"""
         self.notification_service = TelegramNotificationService(bot)
+
+    async def _initialize_topic_cache(self) -> None:
+        """Initialize topic cache with top_message IDs for common topics"""
+        if not self.client:
+            logger.warning("Telegram client not available for topic cache initialization")
+            return
+
+        try:
+            # Get all active subscriptions to find unique channel-topic combinations
+            db = mongodb.get_database()
+            subscriptions = await db.user_channel_subscriptions.find({
+                "is_active": True,
+                "topic_id": {"$ne": None}
+            }).to_list(length=None)
+
+            # Extract unique channel-topic combinations
+            unique_combinations = set()
+            for sub in subscriptions:
+                channel_id = sub.get("channel_id")
+                topic_id = sub.get("topic_id")
+                if channel_id and topic_id:
+                    # Convert channel_id to integer if it's a string
+                    if isinstance(channel_id, str):
+                        try:
+                            channel_id = int(channel_id)
+                        except ValueError:
+                            continue
+                    unique_combinations.add((channel_id, topic_id))
+
+            logger.info("Initializing topic cache for %d unique channel-topic combinations", len(unique_combinations))
+
+            # Cache top_message for each combination
+            for channel_id, topic_id in unique_combinations:
+                try:
+                    top_message = await self._get_top_message_for_topic(channel_id, topic_id)
+                    if top_message:
+                        self.topic_cache[(channel_id, topic_id)] = top_message
+                        logger.info("Cached top_message %s for channel %s, topic %s", top_message, channel_id, topic_id)
+                    else:
+                        logger.warning("Could not get top_message for channel %s, topic %s", channel_id, topic_id)
+                except Exception as e:
+                    logger.error("Error caching topic %s in channel %s: %s", topic_id, channel_id, e)
+
+            logger.info("Topic cache initialized with %d entries", len(self.topic_cache))
+
+        except Exception as e:
+            logger.error("Error initializing topic cache: %s", e)
+
+    async def _update_topic_cache(self, channel_id: int, topic_id: int) -> None:
+        """Update topic cache with a new channel-topic combination"""
+        if not self.client:
+            logger.warning("Telegram client not available for topic cache update")
+            return
+
+        try:
+            # Convert channel_id to integer if it's a string
+            if isinstance(channel_id, str):
+                try:
+                    channel_id = int(channel_id)
+                except ValueError:
+                    logger.error("Invalid channel_id format: %s", channel_id)
+                    return
+
+            cache_key = (channel_id, topic_id)
+            
+            # Skip if already cached
+            if cache_key in self.topic_cache:
+                logger.debug("Topic %s in channel %s already cached", topic_id, channel_id)
+                return
+
+            # Get top_message and cache it
+            top_message = await self._get_top_message_for_topic(channel_id, topic_id)
+            if top_message:
+                self.topic_cache[cache_key] = top_message
+                logger.info("Updated topic cache with top_message %s for channel %s, topic %s", 
+                          top_message, channel_id, topic_id)
+            else:
+                logger.warning("Could not get top_message for channel %s, topic %s", channel_id, topic_id)
+
+        except Exception as e:
+            logger.error("Error updating topic cache for channel %s, topic %s: %s", channel_id, topic_id, e)
+
+    async def update_topic_cache(self, channel_id: int, topic_id: int) -> None:
+        """Public method to update topic cache when new subscriptions are added"""
+        await self._update_topic_cache(channel_id, topic_id)
 
     async def start_monitoring(self) -> None:
         """Start monitoring Telegram channels"""
@@ -48,6 +134,9 @@ class TelegramService:
             )
 
             await self.client.start(phone=settings.TELEGRAM_PHONE)
+
+            # Initialize topic cache for better performance
+            await self._initialize_topic_cache()
 
             # Get monitored channels from user subscriptions
             user_channels = await self._get_user_monitored_channels()
@@ -77,7 +166,7 @@ class TelegramService:
                                 "Message %s from subchannel %s or no reply_to, skipping", message.id, reply_to_msg_id
                             )
                             return
-                        await self._process_message(event.message)
+                        await self._process_message(event.message, user_id=None)
             else:
                 # Use user subscriptions for monitoring
                 channel_ids = list(user_channels.keys())
@@ -98,7 +187,7 @@ class TelegramService:
             raise
 
     async def _handle_user_subscription_message(self, event: events.NewMessage.Event, user_channels: Dict[int, List[Dict]]) -> None:
-        """Handle new message from user subscribed channels"""
+        """Handle new message from user subscribed channels using top_message filtering"""
         try:
             message = event.message
             chat_id = event.chat_id
@@ -111,12 +200,6 @@ class TelegramService:
                 logger.warning("No subscriptions found for channel %s", chat_id)
                 return
             
-            # Check if message matches any subscription criteria
-            rt = getattr(message, "reply_to", None)
-            reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
-            
-            logger.info("Message %s: reply_to=%s, reply_to_msg_id=%s", message.id, rt, reply_to_msg_id)
-            
             # Process message for each matching subscription
             for subscription in channel_subscriptions:
                 user_id = subscription["user_id"]
@@ -124,23 +207,27 @@ class TelegramService:
                 monitor_all_topics = subscription["monitor_all_topics"]
                 monitored_topics = subscription["monitored_topics"]
                 
-                # Check if message matches subscription criteria
+                # Check if message matches subscription criteria using top_message approach
                 should_process = False
                 
                 if monitor_all_topics:
-                    # Monitor all topics in this channel
+                    # Monitor all topics in this channel - process all messages
                     should_process = True
                     logger.info("Processing message for user %s (monitor_all_topics=True)", user_id)
-                elif topic_id and reply_to_msg_id == topic_id:
-                    # Monitor specific topic
-                    should_process = True
-                    logger.info("Processing message for user %s (topic_id=%s)", user_id, topic_id)
-                elif monitored_topics and reply_to_msg_id in monitored_topics:
-                    # Monitor specific topics from list
-                    should_process = True
-                    logger.info("Processing message for user %s (monitored_topics=%s)", user_id, monitored_topics)
-                elif not topic_id and not monitored_topics and not monitor_all_topics:
-                    # Monitor main channel (no topic filtering)
+                elif topic_id:
+                    # Monitor specific topic - check if message belongs to this topic
+                    should_process = await self._is_message_in_topic(message, chat_id, topic_id)
+                    if should_process:
+                        logger.info("Processing message for user %s (topic_id=%s)", user_id, topic_id)
+                elif monitored_topics:
+                    # Monitor specific topics from list - check if message belongs to any of them
+                    for t_id in monitored_topics:
+                        if await self._is_message_in_topic(message, chat_id, t_id):
+                            should_process = True
+                            logger.info("Processing message for user %s (monitored_topics=%s, matched=%s)", user_id, monitored_topics, t_id)
+                            break
+                else:
+                    # Monitor main channel (no topic filtering) - process all messages
                     should_process = True
                     logger.info("Processing message for user %s (main channel)", user_id)
                 
@@ -159,7 +246,7 @@ class TelegramService:
             # Use existing _process_message logic
             # The _process_message method already handles LLM parsing and filter checking
             # It will create UserFilterMatch records for matching filters automatically
-            await self._process_message(message, force=False)
+            await self._process_message(message, force=False, user_id=user_id)
             logger.info("Message %s processed for user %s", message.id, user_id)
                 
         except Exception as e:
@@ -296,6 +383,7 @@ class TelegramService:
             
             subscription_service = UserChannelSubscriptionService()
             subscriptions = await subscription_service.get_all_active_subscriptions()
+            logger.info("Found %d active subscriptions", len(subscriptions))
             
             # Group subscriptions by channel
             channels = {}
@@ -317,8 +405,11 @@ class TelegramService:
                             logger.warning("Username channel %s not supported yet", channel_id)
                             continue
                         else:
-                            # Try to parse as integer
+                            # Try to parse as integer and convert to supergroup format
                             channel_id_int = int(channel_id)
+                            # Convert to supergroup format (-100XXXXXXXXXX)
+                            if channel_id_int > 0:
+                                channel_id_int = -(channel_id_int + 1000000000000)
                     else:
                         channel_id_int = int(channel_id)
                 except (ValueError, TypeError):
@@ -358,24 +449,6 @@ class TelegramService:
             logger.error("Error getting monitored subchannels: %s", e)
             return []
 
-    def _is_message_in_topic(self, message: Message, topic_id: int) -> bool:
-        """Check if message is in the specified topic (old method - kept for compatibility)"""
-        try:
-            # Check if message is in the specific topic
-            if message.reply_to and hasattr(message.reply_to, "reply_to_top_id"):
-                if message.reply_to.reply_to_top_id == topic_id:
-                    logger.debug("Message %s is in topic %s (via reply_to)", message.id, topic_id)
-                    return True
-
-            # For messages without reply_to, we cannot determine the topic
-            # This is a limitation of Telegram API - we need reply_to to identify topics
-            # We'll be strict and only process messages with reply_to
-            logger.debug("Message %s has no reply_to, cannot determine topic, skipping", message.id)
-            return False
-
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error("Error checking topic: %s", e)
-            return False
 
     def _is_message_in_topic_correct(self, message: Message) -> bool:
         """Check if message is in the main topic (no reply_to) - where real estate ads are posted"""
@@ -398,22 +471,11 @@ class TelegramService:
     def _is_from_monitored_subchannel(self, message: Message) -> bool:
         """Check if message is from a monitored subchannel (topic)"""
         try:
-            monitored_subchannels = self._get_monitored_subchannels()
-
-            if not monitored_subchannels:
-                # If no subchannels configured, process all messages
-                return True
-
-            # Since we already filtered messages by topic in reprocess_recent_messages,
-            # we can assume all messages are from the correct topic
-            for channel_id, _ in monitored_subchannels:
-                if message.chat_id == channel_id:
-                    logger.debug(
-                        "Message %s from channel %s, processing (already filtered by topic)", message.id, channel_id
-                    )
-                    return True
-
-            return False
+            # For user subscription monitoring, we should process all messages
+            # The filtering by channel and topic is already done in _handle_user_subscription_message
+            # If there's a topic_id in the subscription, it will be checked there
+            logger.debug("Message %s from channel %s, processing (user subscription mode)", message.id, message.chat_id)
+            return True
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error checking subchannel: %s", e)
             return False
@@ -515,7 +577,7 @@ class TelegramService:
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error saving message status: %s", e)
 
-    async def _process_message(self, message: Message, force: bool = False) -> None:
+    async def _process_message(self, message: Message, force: bool = False, user_id: Optional[int] = None) -> None:
         """Process incoming message"""
         real_estate_ad = None  # Initialize variable
         logger.info("DEBUG: _process_message called for message %s", message.id)
@@ -659,11 +721,11 @@ class TelegramService:
                     # Check if LLM determined this is actually real estate
                     if real_estate_ad.is_real_estate:
                         # Check simple filters (exact field matching)
-                        filter_result = await self.simple_filter_service.check_filters(real_estate_ad)
+                        filter_result = await self.simple_filter_service.check_filters(real_estate_ad, user_id)
 
                         # Update ad with filter matching information
-                        real_estate_ad.matched_filters = filter_result["matching_filters"]
-                        real_estate_ad.should_forward = filter_result["should_forward"]
+                        # Note: matched_filters is now handled via UserFilterMatch model
+                        # Note: should_forward is now handled via UserFilterMatch model
 
                         # Save parsed ad with filter information
                         ad_data = real_estate_ad.dict(exclude={"id"})
@@ -722,6 +784,21 @@ class TelegramService:
                     for filter_id in filter_result["matching_filters"]:
                         await self._forward_post(message, real_estate_ad, filter_id)
 
+            else:
+                # Message has no text, skip processing
+                logger.info("Message %s has no text, skipping LLM processing", message.id)
+                await db.incoming_messages.update_one(
+                    {"id": message.id, "channel_id": message.chat_id},
+                    {
+                        "$set": {
+                            "processing_status": "no_text",
+                            "is_real_estate": False,
+                            "processed_at": message.date,
+                            "updated_at": message.date,
+                        }
+                    },
+                )
+
             # Mark message as processed
             if real_estate_ad:
                 # Already updated above
@@ -760,7 +837,7 @@ class TelegramService:
             except Exception as update_error:  # pylint: disable=broad-except
                 logger.error("Error updating post status to error: %s", update_error)
 
-    async def _forward_post(self, message: Message, real_estate_ad: Any, filter_id: str) -> None:
+    async def _forward_post(self, message: Optional[Message], real_estate_ad: Any, filter_id: str) -> None:
         """Forward post to user via bot"""
         try:
             # Get user ID from settings (your Telegram user ID)
@@ -779,11 +856,18 @@ class TelegramService:
 
             if self.notification_service:
                 await self.notification_service.send_message(
-                    user_id=user_id, message=formatted_message, parse_mode="Markdown", reply_markup=reply_markup
+                    user_id=user_id, message=formatted_message, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
 
             # Save forwarding record
             db = mongodb.get_database()
+            
+            # Get channel and topic information
+            channel_info = await self._get_channel_info(real_estate_ad.original_channel_id)
+            topic_title = None
+            if real_estate_ad.original_topic_id:
+                topic_title = await self._get_topic_title(real_estate_ad.original_channel_id, real_estate_ad.original_topic_id)
+            
             forwarding_data = {
                 "original_post_id": message.id,
                 "original_channel_id": message.chat_id,
@@ -791,6 +875,12 @@ class TelegramService:
                 "filter_id": filter_id,
                 "user_id": user_id,
                 "processing_status": "forwarded",
+                "message": formatted_message,
+                "channel_id": real_estate_ad.original_channel_id,
+                "channel_username": channel_info.get('username') if channel_info else None,
+                "channel_title": channel_info.get('title') if channel_info else None,
+                "topic_id": real_estate_ad.original_topic_id,
+                "topic_title": topic_title,
             }
             await db.forwarded_posts.insert_one(forwarding_data)
 
@@ -833,9 +923,9 @@ class TelegramService:
 
         return groups
 
-    async def reprocess_recent_messages(self, num_messages: int, force: bool = False) -> dict:
+    async def reprocess_recent_messages(self, num_messages: int, force: bool = False, user_id: Optional[int] = None, channel_id: Optional[int] = None) -> dict:
         """Reprocess N recent messages from monitored channels"""
-        logger.info("Starting reprocess_recent_messages: num_messages=%s, force=%s", num_messages, force)
+        logger.info("Starting reprocess_recent_messages: num_messages=%s, force=%s, user_id=%s", num_messages, force, user_id)
 
         db = mongodb.get_database()
         stats = {
@@ -849,8 +939,22 @@ class TelegramService:
             "errors": 0,  # Number of advertisements with processing errors
         }
 
-        # Get monitored channels
-        channels = self._get_monitored_channels()
+        # Get monitored channels - use user subscriptions if available
+        if channel_id:
+            # Specific channel requested
+            channels = [channel_id]
+            logger.info("Using specific channel: %s", channel_id)
+        elif user_id:
+            user_channels = await self._get_user_monitored_channels()
+            if user_channels:
+                channels = list(user_channels.keys())
+                logger.info("Using user monitored channels: %s", channels)
+            else:
+                logger.warning("No user subscriptions found, falling back to legacy channels")
+                channels = self._get_monitored_channels()
+        else:
+            channels = self._get_monitored_channels()
+            
         if not channels:
             logger.warning("No monitored channels found")
             return stats
@@ -860,32 +964,48 @@ class TelegramService:
         recent_messages = []
 
         for channel_id in channels:
-            # Process only messages from main topic (reply_to_msg_id=2629)
-            # Skip all other subchannels
-            logger.info("Fetching messages from channel %s (main topic only - reply_to_msg_id=2629)", channel_id)
+            logger.info("Fetching messages from channel %s", channel_id)
             messages = []
             if not self.client:
                 logger.error("Telegram client not initialized")
                 continue
+            
+            # Get user subscriptions for this channel if user_id is provided
+            channel_subscriptions = []
+            if user_id and user_id in [sub.get("user_id") for sub in (await self._get_user_monitored_channels()).get(channel_id, [])]:
+                channel_subscriptions = (await self._get_user_monitored_channels()).get(channel_id, [])
+            
             async for message in self.client.iter_messages(int(channel_id), limit=messages_to_fetch):
-                # Process only messages from main topic
-                rt = getattr(message, "reply_to", None)
-                reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
-
-                if rt and reply_to_msg_id == 2629:
-                    # Message from main topic with real estate ads, process it
-                    messages.append(message)
-                    logger.debug("Message %s: reply_to_msg_id=%s (main topic, processing)", message.id, reply_to_msg_id)
+                # Check if message matches user subscription criteria
+                should_process = False
+                
+                if user_id and channel_subscriptions:
+                    # Check against user subscription criteria
+                    for subscription in channel_subscriptions:
+                        sub_user_id = subscription["user_id"]
+                        topic_id = subscription["topic_id"]
+                        monitor_all_topics = subscription["monitor_all_topics"]
+                        
+                        if sub_user_id == user_id:
+                            if monitor_all_topics:
+                                should_process = True
+                            elif topic_id:
+                                should_process = await self._is_message_in_topic(message, channel_id, topic_id)
+                            else:
+                                should_process = True
+                            break
                 else:
-                    # Message from other subchannels or no reply_to, skip it
-                    logger.debug(
-                        "Message %s: reply_to_msg_id=%s (subchannel or no reply_to, skipping)",
-                        message.id,
-                        reply_to_msg_id,
-                    )
+                    # Legacy mode - process all messages
+                    should_process = True
+                
+                if should_process:
+                    messages.append(message)
+                    logger.debug("Message %s: processing for user %s", message.id, user_id)
+                else:
+                    logger.debug("Message %s: skipping (doesn't match criteria)", message.id)
 
             recent_messages.extend(messages)
-            logger.info("Fetched %s messages from channel %s (main topic only)", len(messages), channel_id)
+            logger.info("Fetched %s messages from channel %s", len(messages), channel_id)
 
         # Sort by date (newest first)
         recent_messages.sort(key=lambda x: x.date, reverse=True)
@@ -972,7 +1092,7 @@ class TelegramService:
                 logger.info("Message %s not found in database, processing for first time", main_message.id)
 
             # Process the main message
-            await self._process_message(main_message, force)
+            await self._process_message(main_message, force, user_id=user_id)
 
             # Only count messages with text (not media-only)
             if not self._is_media_only_message(main_message):
@@ -992,16 +1112,34 @@ class TelegramService:
                 elif post.get("processing_status") in ["parsed", "filtered", "forwarded"]:
                     stats["real_estate_ads"] += 1
 
-                    # Check if it matched filters
-                    real_estate_ad = await db.real_estate_ads.find_one(
-                        {"original_post_id": main_message.id, "original_channel_id": main_message.chat_id}
-                    )
-
-                    if real_estate_ad and real_estate_ad.get("matched_filters"):
-                        stats["matched_filters"] += 1
-
-                    if post.get("processing_status") == "forwarded":
-                        stats["forwarded"] += 1
+                    # Check if it matched filters for this user
+                    if user_id:
+                        # Get real estate ad ID for this message
+                        real_estate_ad = await db.real_estate_ads.find_one({
+                            "original_post_id": main_message.id, 
+                            "original_channel_id": main_message.chat_id
+                        })
+                        
+                        if real_estate_ad:
+                            # Check if there are any UserFilterMatch records for this user and ad
+                            match_count = await db.user_filter_matches.count_documents({
+                                "user_id": user_id,
+                                "real_estate_ad_id": str(real_estate_ad["_id"])
+                            })
+                            if match_count > 0:
+                                stats["matched_filters"] += 1
+                            
+                            # Check if it was forwarded to this user
+                            forwarded_count = await db.outgoing_posts.count_documents({
+                                "sent_to": str(user_id),
+                                "real_estate_ad_id": str(real_estate_ad["_id"])
+                            })
+                            if forwarded_count > 0:
+                                stats["forwarded"] += 1
+                    else:
+                        # Legacy mode - count all matches
+                        if post.get("processing_status") == "forwarded":
+                            stats["forwarded"] += 1
                 elif post.get("processing_status") == "error":
                     stats["errors"] += 1
 
@@ -1072,51 +1210,229 @@ class TelegramService:
             channel_id = abs(channel_id) - 1000000000000
         return f"https://t.me/c/{channel_id}/{message_id}"
 
+    def _escape_markdown(self, text: str) -> str:
+        """Escape special characters for MarkdownV2"""
+        if not text:
+            return ""
+        # Escape special characters for MarkdownV2
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+
     async def _format_real_estate_message(
-        self, real_estate_ad: Any, _original_message: Message, filter_id: Optional[str] = None
+        self, real_estate_ad: Any, _original_message: Optional[Message], filter_id: Optional[str] = None
     ) -> str:
         """Format real estate ad for forwarding"""
-        message = "🏠 **Найдено подходящее объявление!**\n\n"
+        message = "🏠 *Найдено подходящее объявление\\!*\n\n"
 
         if real_estate_ad.property_type:
             property_name = self._get_property_type_name(real_estate_ad.property_type)
-            message += f"**Тип:** {property_name}\n"
+            message += f"*Тип:* {self._escape_markdown(property_name)}\n"
         if real_estate_ad.rooms_count:
-            message += f"**Комнат:** {real_estate_ad.rooms_count}\n"
+            message += f"*Комнат:* {self._escape_markdown(str(real_estate_ad.rooms_count))}\n"
         if real_estate_ad.area_sqm:
-            message += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
+            message += f"*Площадь:* {self._escape_markdown(str(real_estate_ad.area_sqm))} кв\\.м\n"
         if real_estate_ad.price:
             currency_symbol = "драм" if real_estate_ad.currency == "AMD" else real_estate_ad.currency
-            message += f"**Цена:** {real_estate_ad.price:,} {currency_symbol}\n"
+            message += f"*Цена:* {self._escape_markdown(f'{real_estate_ad.price:,} {currency_symbol}')}\n"
         if real_estate_ad.district:
-            message += f"**Район:** {real_estate_ad.district}\n"
+            message += f"*Район:* {self._escape_markdown(real_estate_ad.district)}\n"
         if real_estate_ad.address:
-            message += f"**Адрес:** {real_estate_ad.address}\n"
+            message += f"*Адрес:* {self._escape_markdown(real_estate_ad.address)}\n"
         if real_estate_ad.contacts:
             contacts_str = (
                 ", ".join(real_estate_ad.contacts)
                 if isinstance(real_estate_ad.contacts, list)
                 else str(real_estate_ad.contacts)
             )
-            message += f"**Контакты:** {contacts_str}\n"
+            message += f"*Контакты:* {self._escape_markdown(contacts_str)}\n"
+
+        # Add channel and topic information
+        channel_info = await self._get_channel_info(real_estate_ad.original_channel_id)
+        if channel_info:
+            channel_title = self._escape_markdown(channel_info.get('title', 'Неизвестный канал'))
+            message += f"\n*📢 Канал:* {channel_title}"
+            if channel_info.get('username'):
+                username = channel_info['username'].lstrip('@')
+                message += f" \\(@{username}\\)"
+            
+            # Add topic information if available
+            if real_estate_ad.original_topic_id:
+                topic_title = await self._get_topic_title(real_estate_ad.original_channel_id, real_estate_ad.original_topic_id)
+                if topic_title:
+                    message += f"\n*📌 Топик:* {self._escape_markdown(topic_title)}"
+                else:
+                    message += f"\n*📌 Топик:* #{real_estate_ad.original_topic_id}"
 
         # Add filter matching information
-        if real_estate_ad.matched_filters:
-            message += f"\n**✅ Соответствует фильтрам:** {len(real_estate_ad.matched_filters)}\n"
+        # Note: Filter matching info is now handled via UserFilterMatch model
             if filter_id:
                 filter_name = await self._get_filter_name(str(filter_id))
-                message += f"**🎯 Активный фильтр:** {filter_name}\n"
+                message += f"*🎯 Активный фильтр:* {self._escape_markdown(filter_name)}\n"
 
-        message += f"\n**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n"
+        message += f"\n*Уверенность:* {self._escape_markdown(f'{real_estate_ad.parsing_confidence:.2f}')}\n"
 
         # Add original message link
         message_link = self._get_message_link(
             real_estate_ad.original_channel_id, real_estate_ad.original_post_id, real_estate_ad.original_topic_id
         )
-        message += f"\n**Оригинальный текст:**\n{real_estate_ad.original_message[:300]}...\n\n"
+        original_text = self._escape_markdown(real_estate_ad.original_message[:300])
+        message += f"\n*Оригинальный текст:*\n{original_text}\\.\\.\\.\n\n"
         message += f"🔗 [Читать полностью]({message_link})"
 
         return message
+
+    async def _get_channel_info(self, channel_id: int) -> Optional[Dict[str, str]]:
+        """Get channel information by ID"""
+        try:
+            if not self.client:
+                return None
+            
+            # Convert supergroup ID to regular ID for API call
+            if channel_id < 0:
+                regular_id = abs(channel_id) - 1000000000000
+            else:
+                regular_id = channel_id
+            
+            entity = await self.client.get_entity(regular_id)
+            
+            return {
+                'id': channel_id,
+                'title': getattr(entity, 'title', 'Неизвестный канал'),
+                'username': getattr(entity, 'username', None)
+            }
+        except Exception as e:
+            logger.error("Error getting channel info for %s: %s", channel_id, e)
+            return None
+
+    async def _get_topic_title(self, channel_id: int, topic_id: int) -> Optional[str]:
+        """Get topic title by channel and topic ID"""
+        try:
+            if not self.client:
+                return None
+            
+            from telethon import functions
+            
+            # Convert supergroup ID to regular ID for API call
+            if channel_id < 0:
+                regular_id = abs(channel_id) - 1000000000000
+            else:
+                regular_id = channel_id
+            
+            channel = await self.client.get_input_entity(regular_id)
+            result = await self.client(functions.channels.GetForumTopicsByIDRequest(
+                channel=channel,
+                topics=[topic_id],
+            ))
+            
+            if result.topics:
+                return result.topics[0].title
+            
+            return None
+        except Exception as e:
+            logger.error("Error getting topic title for channel %s, topic %s: %s", channel_id, topic_id, e)
+            return None
+
+    async def _get_top_message_for_topic(self, channel_id: int, topic_id: int) -> Optional[int]:
+        """Get the top_message id (thread root) for a given forum topic"""
+        try:
+            if not self.client:
+                return None
+            
+            # Check cache first
+            cache_key = (channel_id, topic_id)
+            if cache_key in self.topic_cache:
+                return self.topic_cache[cache_key]
+            
+            from telethon import functions, types
+            
+            # Convert supergroup ID to regular ID for API call
+            if channel_id < 0:
+                regular_id = abs(channel_id) - 1000000000000
+            else:
+                regular_id = channel_id
+            
+            channel = await self.client.get_input_entity(regular_id)
+            result: types.messages.ForumTopics = await self.client(
+                functions.channels.GetForumTopicsByIDRequest(
+                    channel=channel,
+                    topics=[topic_id],
+                )
+            )
+            
+            if not result.topics:
+                logger.error("No such topic_id=%s in channel %s", topic_id, channel_id)
+                return None
+                
+            top_message = result.topics[0].top_message
+            
+            # Cache the result
+            self.topic_cache[cache_key] = top_message
+            logger.debug("Cached top_message %s for channel %s, topic %s", top_message, channel_id, topic_id)
+            
+            return top_message
+        except Exception as e:
+            logger.error("Error getting top message for channel %s, topic %s: %s", channel_id, topic_id, e)
+            return None
+
+    async def _iter_topic_messages(self, channel_id: int, topic_id: int, limit: Optional[int] = None):
+        """Iterate only messages that belong to the given forum topic"""
+        try:
+            if not self.client:
+                return
+            
+            top_msg = await self._get_top_message_for_topic(channel_id, topic_id)
+            if not top_msg:
+                logger.error("Could not get top message for topic %s in channel %s", topic_id, channel_id)
+                return
+            
+            # This yields *only* replies in that thread (the forum topic)
+            async for msg in self.client.iter_messages(channel_id, reply_to=top_msg, limit=limit):
+                yield msg
+        except Exception as e:
+            logger.error("Error iterating topic messages for channel %s, topic %s: %s", channel_id, topic_id, e)
+
+    async def _is_message_in_topic(self, message, channel_id: int, topic_id: int) -> bool:
+        """Check if a message belongs to a specific forum topic using top_message approach"""
+        try:
+            if not self.client:
+                return False
+            
+            # Check cache first
+            cache_key = (channel_id, topic_id)
+            top_msg = self.topic_cache.get(cache_key)
+            
+            if top_msg is None:
+                # Cache miss - get from API and cache it
+                top_msg = await self._get_top_message_for_topic(channel_id, topic_id)
+                if top_msg:
+                    self.topic_cache[cache_key] = top_msg
+                    logger.debug("Cached top_message %s for channel %s, topic %s", top_msg, channel_id, topic_id)
+                else:
+                    logger.warning("Could not get top message for topic %s in channel %s", topic_id, channel_id)
+                    return False
+            
+            # Check if this message is a reply to the top message
+            rt = getattr(message, "reply_to", None)
+            reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
+            
+            # Also check if this message IS the top message itself
+            is_top_message = message.id == top_msg
+            
+            # Check if this message is a reply to the top message
+            is_reply_to_top = reply_to_msg_id == top_msg
+            
+            result = is_top_message or is_reply_to_top
+            
+            logger.debug("Message %s in topic %s: is_top=%s, is_reply_to_top=%s, result=%s", 
+                        message.id, topic_id, is_top_message, is_reply_to_top, result)
+            
+            return result
+            
+        except Exception as e:
+            logger.error("Error checking if message %s is in topic %s: %s", message.id, topic_id, e)
+            return False
 
     async def refilter_ads(self, count: int) -> dict:
         """Refilter existing ads without reprocessing using new UserFilterMatch architecture"""
@@ -1135,7 +1451,7 @@ class TelegramService:
             logger.info("Found %s ads to refilter", len(ads_list))
 
             total_checked = 0
-            matched_filters = 0
+                # Note: matched_filters is now handled via UserFilterMatch model
             forwarded = 0
             errors = 0
 
@@ -1181,15 +1497,23 @@ class TelegramService:
                         for filter_doc in user_filter_docs:
                             filter_obj = SimpleFilter(**filter_doc)
                             
+                            # Debug logging
+                            logger.info("Checking ad %s (rooms=%s) against filter %s (min_rooms=%s, max_rooms=%s)", 
+                                       ad.original_post_id, ad.rooms_count, filter_obj.name, 
+                                       filter_obj.min_rooms, filter_obj.max_rooms)
+                            
                             if filter_obj.matches(ad):
                                 filter_id = str(filter_obj.id) if filter_obj.id else "unknown"
                                 matching_filters.append(filter_id)
                                 logger.info("Ad %s matched filter %s for user %s", 
                                            ad.original_post_id, filter_obj.name, user_id)
+                            else:
+                                logger.info("Ad %s did NOT match filter %s for user %s", 
+                                           ad.original_post_id, filter_obj.name, user_id)
                         
                         # Create UserFilterMatch records for matching filters
                         if matching_filters:
-                            matched_filters += len(matching_filters)
+                            # Note: matched_filters is now handled via UserFilterMatch model
                             
                             for filter_id in matching_filters:
                                 # Create match record
@@ -1210,12 +1534,8 @@ class TelegramService:
                                     
                                     if not existing_forward:
                                         try:
-                                            # Create a mock message object for forwarding
-                                            mock_message = MagicMock()
-                                            mock_message.chat_id = ad.original_channel_id
-                                            mock_message.id = ad.original_post_id
-
-                                            await self._forward_post(mock_message, ad, filter_id)
+                                            # Forward post - _original_message is not used in _format_real_estate_message
+                                            await self._forward_post(None, ad, filter_id)
                                             forwarded += 1
                                             logger.info("Ad %s forwarded to user %s", ad.original_post_id, user_id)
                                             
@@ -1233,7 +1553,7 @@ class TelegramService:
 
             result = {
                 "total_checked": total_checked,
-                "matched_filters": matched_filters,
+                # Note: matched_filters is now handled via UserFilterMatch model
                 "forwarded": forwarded,
                 "errors": errors,
             }

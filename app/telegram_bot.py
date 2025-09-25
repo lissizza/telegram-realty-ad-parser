@@ -81,6 +81,10 @@ class TelegramBot:
                     web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions"),
                 )
             ],
+            [
+                InlineKeyboardButton("🔄 Обработать сообщения", callback_data="reprocess_menu"),
+                InlineKeyboardButton("🎯 Перефильтровать", callback_data="refilter_menu"),
+            ],
             [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
             [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
         ]
@@ -285,7 +289,7 @@ class TelegramBot:
             )
 
     async def reprocess_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /reprocess command"""
+        """Handle /reprocess command with optional channel specification"""
         try:
             # Get message object (could be from callback or regular message)
             message = update.message or (update.callback_query.message if update.callback_query else None)
@@ -293,20 +297,29 @@ class TelegramBot:
                 logger.error("No message object available in update")
                 return
 
-            # Get number of messages to reprocess and force flag
-            if not context.args or len(context.args) < 1 or len(context.args) > 2:
+            # Get user ID for filtering
+            user_id = update.effective_user.id if update.effective_user else None
+
+            # Parse arguments: /reprocess [count] [--force] [--channel=channel_id]
+            if not context.args or len(context.args) < 1:
                 # If no arguments provided, show interactive menu
                 keyboard = [
-                    [InlineKeyboardButton("🔄 5 групп", callback_data="reprocess_5")],
-                    [InlineKeyboardButton("🔄 10 групп", callback_data="reprocess_10")],
-                    [InlineKeyboardButton("🔄 20 групп", callback_data="reprocess_20")],
-                    [InlineKeyboardButton("🔄 50 групп", callback_data="reprocess_50")],
+                    [InlineKeyboardButton("🔄 5 сообщений", callback_data="reprocess_5")],
+                    [InlineKeyboardButton("🔄 10 сообщений", callback_data="reprocess_10")],
+                    [InlineKeyboardButton("🔄 20 сообщений", callback_data="reprocess_20")],
+                    [InlineKeyboardButton("🔄 50 сообщений", callback_data="reprocess_50")],
                     [InlineKeyboardButton("🔄 Принудительно 10", callback_data="reprocess_force_10")],
+                    [InlineKeyboardButton("📺 Выбрать канал", callback_data="reprocess_channel_select")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await message.reply_text(
-                    "🔄 **Обработка сообщений**\n\nВыберите количество групп сообщений для обработки:",
+                    "🔄 **Обработка сообщений**\n\n"
+                    "Выберите количество сообщений для обработки или канал:\n\n"
+                    "**Доступные команды:**\n"
+                    "• `/reprocess 10` - обработать 10 последних сообщений\n"
+                    "• `/reprocess 10 --force` - принудительно переобработать\n"
+                    "• `/reprocess 10 --channel=1827102719` - обработать из конкретного канала",
                     reply_markup=reply_markup,
                     parse_mode="Markdown",
                 )
@@ -321,15 +334,28 @@ class TelegramBot:
                 await message.reply_text("❌ Количество сообщений должно быть числом")
                 return
 
-            # Check for force flag
-            force_reprocess = len(context.args) == 2 and context.args[1] == "--force"
+            # Parse additional flags
+            force_reprocess = False
+            channel_id = None
+            
+            for arg in context.args[1:]:
+                if arg == "--force":
+                    force_reprocess = True
+                elif arg.startswith("--channel="):
+                    try:
+                        channel_id = int(arg.split("=")[1])
+                    except (ValueError, IndexError):
+                        await message.reply_text("❌ Неверный формат channel_id. Используйте: --channel=1827102719")
+                        return
 
             # Send processing started message
             mode_text = (
                 "принудительно переобработать" if force_reprocess else "обработать (пропустить уже обработанные)"
             )
+            channel_text = f" из канала {channel_id}" if channel_id else ""
+            
             processing_msg = await message.reply_text(
-                f"🔄 Начинаю {mode_text} {num_messages} последних объявлений из канала...\n"
+                f"🔄 Начинаю {mode_text} {num_messages} последних объявлений{channel_text}...\n"
                 "Это может занять некоторое время."
             )
 
@@ -340,9 +366,9 @@ class TelegramBot:
                 if processing_msg and hasattr(processing_msg, "edit_text"):
                     await processing_msg.edit_text("❌ Сервис обработки сообщений недоступен")
                 return
-
+            
             # Reprocess messages
-            result = await telegram_service.reprocess_recent_messages(num_messages, force_reprocess)
+            result = await telegram_service.reprocess_recent_messages(num_messages, force_reprocess, user_id, channel_id)
 
             # Update message with results
             if processing_msg and hasattr(processing_msg, "edit_text"):
@@ -605,6 +631,16 @@ class TelegramBot:
                     reply_markup=reply_markup,
                     parse_mode="Markdown",
                 )
+        elif query.data == "reprocess_menu":
+            await self.reprocess_command(update, context)
+        elif query.data == "refilter_menu":
+            await self.refilter_command(update, context)
+        elif query.data == "reprocess_channel_select":
+            await self.show_channel_selection(update, context)
+        elif query.data and query.data.startswith("reprocess_channel_"):
+            await self.handle_channel_reprocess_callback(update, context, query.data)
+        elif query.data and query.data.startswith("reprocess_count_"):
+            await self.handle_reprocess_count_callback(update, context, query.data)
         elif query.data and query.data.startswith("reprocess_"):
             await self.handle_reprocess_callback(update, context, query.data)
         elif query.data and query.data.startswith("refilter_"):
@@ -645,10 +681,13 @@ class TelegramBot:
 
             # Use telegram service
 
+            # Get user ID for filtering
+            user_id = update.effective_user.id if update.effective_user else None
+            
             # Reprocess messages
             telegram_service = get_telegram_service()
             if telegram_service:
-                result = await telegram_service.reprocess_recent_messages(num_messages, force)
+                result = await telegram_service.reprocess_recent_messages(num_messages, force, user_id)
             else:
                 await query.edit_message_text("❌ Сервис обработки сообщений недоступен")
                 return
@@ -724,6 +763,154 @@ class TelegramBot:
         except Exception as e:
             logger.error("Error in refilter callback: %s", e)
             await query.edit_message_text(f"❌ Произошла ошибка при фильтрации: {str(e)}")
+
+    async def show_channel_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show channel selection menu for reprocess"""
+        query = update.callback_query
+        if not query:
+            return
+
+        try:
+            # Get user subscriptions to show available channels
+            user_id = update.effective_user.id if update.effective_user else None
+            if not user_id:
+                await query.edit_message_text("❌ Не удалось определить пользователя")
+                return
+
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            if not telegram_service:
+                await query.edit_message_text("❌ Сервис недоступен")
+                return
+
+            user_channels = await telegram_service._get_user_monitored_channels()
+            if not user_channels:
+                await query.edit_message_text("❌ У вас нет подписок на каналы")
+                return
+
+            # Create keyboard with channels
+            keyboard = []
+            for channel_id, subscriptions in user_channels.items():
+                for sub in subscriptions:
+                    channel_title = sub.get("channel_title", f"Канал {channel_id}")
+                    topic_text = ""
+                    if sub.get("topic_id"):
+                        topic_title = sub.get("topic_title", f"Топик {sub['topic_id']}")
+                        topic_text = f" - {topic_title}"
+                    
+                    button_text = f"📺 {channel_title}{topic_text}"
+                    callback_data = f"reprocess_channel_{channel_id}_{sub.get('topic_id', '')}"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+            # Add back button
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="reprocess_menu")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📺 **Выберите канал для обработки**\n\n"
+                "Выберите канал и топик для обработки сообщений:",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error("Error in show_channel_selection: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
+
+    async def handle_channel_reprocess_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle channel-specific reprocess callback"""
+        query = update.callback_query
+        if not query:
+            return
+
+        try:
+            # Parse callback data: reprocess_channel_{channel_id}_{topic_id}
+            parts = callback_data.split("_")
+            if len(parts) < 3:
+                await query.answer("❌ Неверный формат данных")
+                return
+
+            channel_id = int(parts[2])
+            topic_id = int(parts[3]) if parts[3] else None
+
+            # Show count selection for this channel
+            keyboard = [
+                [InlineKeyboardButton("🔄 5 сообщений", callback_data=f"reprocess_count_5_{channel_id}_{topic_id or ''}")],
+                [InlineKeyboardButton("🔄 10 сообщений", callback_data=f"reprocess_count_10_{channel_id}_{topic_id or ''}")],
+                [InlineKeyboardButton("🔄 20 сообщений", callback_data=f"reprocess_count_20_{channel_id}_{topic_id or ''}")],
+                [InlineKeyboardButton("🔄 50 сообщений", callback_data=f"reprocess_count_50_{channel_id}_{topic_id or ''}")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="reprocess_channel_select")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            topic_text = f" (топик {topic_id})" if topic_id else ""
+            await query.edit_message_text(
+                f"📺 **Обработка канала {channel_id}{topic_text}**\n\n"
+                "Выберите количество сообщений для обработки:",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error("Error in handle_channel_reprocess_callback: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
+
+    async def handle_reprocess_count_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle reprocess count callback with channel"""
+        query = update.callback_query
+        if not query:
+            return
+
+        try:
+            # Parse callback data: reprocess_count_{count}_{channel_id}_{topic_id}
+            parts = callback_data.split("_")
+            if len(parts) < 4:
+                await query.answer("❌ Неверный формат данных")
+                return
+
+            count = int(parts[2])
+            channel_id = int(parts[3])
+            topic_id = int(parts[4]) if parts[4] else None
+
+            # Show processing message
+            topic_text = f" (топик {topic_id})" if topic_id else ""
+            await query.edit_message_text(
+                f"🔄 Обрабатываю {count} сообщений из канала {channel_id}{topic_text}...\n"
+                "Это может занять некоторое время."
+            )
+
+            # Get telegram service
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            if not telegram_service:
+                await query.edit_message_text("❌ Сервис недоступен")
+                return
+
+            # Get user ID
+            user_id = update.effective_user.id if update.effective_user else None
+
+            # Call reprocess with specific channel
+            result = await telegram_service.reprocess_recent_messages(count, False, user_id, channel_id)
+
+            # Update message with results
+            await query.edit_message_text(
+                f"✅ **Обработка завершена!**\n\n"
+                f"📊 **Результаты:**\n"
+                f"• 🔍 Обработано объявлений: {result['total_processed']}\n"
+                f"• ⏭️ Пропущено (уже обработаны): {result['skipped']}\n"
+                f"• 🏠 Найдено объявлений о недвижимости: {result['real_estate_ads']}\n"
+                f"• 🚫 Отфильтровано спама: {result['spam_filtered']}\n"
+                f"• ❌ Не недвижимость: {result['not_real_estate']}\n"
+                f"• 🎯 Соответствует фильтрам: {result['matched_filters']}\n"
+                f"• ✅ Переслано пользователю: {result['forwarded']}\n"
+                f"• ⚠️ Ошибок: {result['errors']}",
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error("Error in handle_reprocess_count_callback: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
 
     def setup_handlers(self):
         """Setup bot handlers"""

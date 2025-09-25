@@ -8,6 +8,7 @@ import pytest
 
 from app.models.simple_filter import SimpleFilter
 from app.models.telegram import PropertyType, RealEstateAd, RentalType
+from app.models.price_filter import PriceFilter
 from app.services.simple_filter_service import SimpleFilterService
 
 
@@ -89,7 +90,7 @@ class TestFilterMatching:
     def test_filter_matches_property_type(self, filter_service, sample_apartment_ad):
         """Test filter matching by property type"""
         # Filter for apartments only
-        filter_obj = SimpleFilter(name="Apartments Only", property_types=[PropertyType.APARTMENT], is_active=True)
+        filter_obj = SimpleFilter(name="Apartments Only", user_id=123456789, property_types=[PropertyType.APARTMENT], is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True
@@ -102,7 +103,7 @@ class TestFilterMatching:
     def test_filter_matches_rental_type(self, filter_service, sample_apartment_ad):
         """Test filter matching by rental type"""
         # Filter for long-term only
-        filter_obj = SimpleFilter(name="Long-term Only", rental_types=[RentalType.LONG_TERM], is_active=True)
+        filter_obj = SimpleFilter(name="Long-term Only", user_id=123456789, rental_types=[RentalType.LONG_TERM], is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True
@@ -115,7 +116,7 @@ class TestFilterMatching:
     def test_filter_matches_rooms_count(self, filter_service, sample_apartment_ad, sample_studio_ad):
         """Test filter matching by room count"""
         # Filter for 2-3 rooms
-        filter_obj = SimpleFilter(name="2-3 Rooms", min_rooms=2, max_rooms=3, is_active=True)
+        filter_obj = SimpleFilter(name="2-3 Rooms", user_id=123456789, min_rooms=2, max_rooms=3, is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True  # 2 rooms matches
@@ -132,7 +133,7 @@ class TestFilterMatching:
     def test_filter_matches_area(self, filter_service, sample_apartment_ad, sample_studio_ad):
         """Test filter matching by area"""
         # Filter for 50-80 sqm
-        filter_obj = SimpleFilter(name="50-80 sqm", min_area=50, max_area=80, is_active=True)
+        filter_obj = SimpleFilter(name="50-80 sqm", user_id=123456789, min_area=50, max_area=80, is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True  # 60 sqm matches
@@ -140,21 +141,22 @@ class TestFilterMatching:
         result = filter_obj.matches(sample_studio_ad)
         assert result is False  # 35 sqm doesn't match
 
-    def test_filter_matches_price(self, filter_service, sample_apartment_ad, sample_house_ad):
-        """Test filter matching by price in AMD"""
-        # Filter for 200k-300k AMD
+    def test_filter_matches_price_legacy(self, filter_service, sample_apartment_ad, sample_house_ad):
+        """Test filter matching by price in AMD (legacy test - price filtering now handled by PriceFilter)"""
+        # This test is kept for backward compatibility but price filtering is now handled by PriceFilter
+        # Filter without price criteria should match based on other criteria
         filter_obj = SimpleFilter(
-            name="200k-300k AMD", min_price=200000, max_price=300000, price_currency="AMD", is_active=True
+            name="No Price Filter", user_id=123456789, is_active=True
         )
 
         result = filter_obj.matches(sample_apartment_ad)
-        assert result is True  # 250k matches
+        assert result is True  # Should match based on other criteria
 
         result = filter_obj.matches(sample_house_ad)
-        assert result is False  # 400k doesn't match
+        assert result is True  # Should match based on other criteria
 
-    def test_filter_matches_price_usd(self, filter_service):
-        """Test filter matching by price in USD"""
+    def test_filter_matches_price_usd_legacy(self, filter_service):
+        """Test filter matching by price in USD (legacy test - price filtering now handled by PriceFilter)"""
         ad_with_usd = RealEstateAd(
             original_post_id=4,
             original_channel_id=12345,
@@ -167,18 +169,18 @@ class TestFilterMatching:
             parsing_confidence=0.9,
         )
 
-        # Filter for 500-1000 USD
+        # Filter without price criteria should match based on other criteria
         filter_obj = SimpleFilter(
-            name="500-1000 USD", min_price=500, max_price=1000, price_currency="USD", is_active=True
+            name="No Price Filter", user_id=123456789, is_active=True
         )
 
         result = filter_obj.matches(ad_with_usd)
-        assert result is True  # 800 USD matches
+        assert result is True  # Should match based on other criteria
 
     def test_filter_matches_district(self, filter_service, sample_apartment_ad, sample_house_ad):
         """Test filter matching by district"""
         # Filter for Центр district
-        filter_obj = SimpleFilter(name="Центр Only", districts=["Центр"], is_active=True)
+        filter_obj = SimpleFilter(name="Центр Only", user_id=123456789, districts=["Центр"], is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True  # Центр matches
@@ -190,7 +192,7 @@ class TestFilterMatching:
         """Test filter matching by boolean features"""
         # Filter requiring balcony and air conditioning
         filter_obj = SimpleFilter(
-            name="With Balcony and AC", has_balcony=True, has_air_conditioning=True, is_active=True
+            name="With Balcony and AC", user_id=123456789, has_balcony=True, has_air_conditioning=True, is_active=True
         )
 
         result = filter_obj.matches(sample_apartment_ad)
@@ -202,7 +204,7 @@ class TestFilterMatching:
     def test_filter_matches_pets_allowed(self, filter_service, sample_apartment_ad, sample_house_ad):
         """Test filter matching by pets allowed"""
         # Filter requiring pets allowed
-        filter_obj = SimpleFilter(name="Pets Allowed", pets_allowed=True, is_active=True)
+        filter_obj = SimpleFilter(name="Pets Allowed", user_id=123456789, pets_allowed=True, is_active=True)
 
         result = filter_obj.matches(sample_apartment_ad)
         assert result is True  # Pets allowed
@@ -216,6 +218,7 @@ class TestFilterMatching:
         # Complex filter: 2-3 room apartment in Центр, 200k-300k AMD, with balcony
         filter_obj = SimpleFilter(
             name="2-3 Room Apartment in Center",
+            user_id=123456789,
             property_types=[PropertyType.APARTMENT],
             rental_types=[RentalType.LONG_TERM],
             min_rooms=2,
@@ -251,7 +254,7 @@ class TestFilterMatching:
     async def test_filter_no_match(self, filter_service, sample_studio_ad):
         """Test filter when no criteria match"""
         # Filter for houses only
-        filter_obj = SimpleFilter(name="Houses Only", property_types=[PropertyType.HOUSE], is_active=True)
+        filter_obj = SimpleFilter(name="Houses Only", user_id=123456789, property_types=[PropertyType.HOUSE], is_active=True)
 
         # Mock the database and get_active_filters method
         with patch("app.services.simple_filter_service.mongodb") as mock_mongodb:
@@ -277,7 +280,7 @@ class TestFilterMatching:
         """Test that inactive filters are ignored"""
         # Inactive filter that would match
         filter_obj = SimpleFilter(
-            name="Inactive Filter", property_types=[PropertyType.APARTMENT], is_active=False  # Inactive
+            name="Inactive Filter", user_id=123456789, property_types=[PropertyType.APARTMENT], is_active=False  # Inactive
         )
 
         # Mock the database and get_active_filters method
@@ -305,9 +308,9 @@ class TestFilterMatching:
         """Test when multiple filters match"""
         # Create multiple filters that would match
         filters = [
-            SimpleFilter(name="Apartments", property_types=[PropertyType.APARTMENT], is_active=True),
-            SimpleFilter(name="Long-term", rental_types=[RentalType.LONG_TERM], is_active=True),
-            SimpleFilter(name="With Balcony", has_balcony=True, is_active=True),
+            SimpleFilter(name="Apartments", user_id=123456789, property_types=[PropertyType.APARTMENT], is_active=True),
+            SimpleFilter(name="Long-term", user_id=123456789, rental_types=[RentalType.LONG_TERM], is_active=True),
+            SimpleFilter(name="With Balcony", user_id=123456789, has_balcony=True, is_active=True),
         ]
 
         # Mock the database and get_active_filters method
@@ -353,6 +356,7 @@ class TestFilterMatching:
         # Создаем фильтр "3-4 Room Apartment Filter"
         filter_obj = SimpleFilter(
             name="3-4 Room Apartment Filter",
+            user_id=123456789,
             property_types=[PropertyType.APARTMENT],
             min_rooms=3,
             max_rooms=4,
@@ -408,6 +412,156 @@ class TestFilterMatching:
 
         # Проверяем, что фильтр должен сработать
         assert result is True, f"3-room apartment should match 3-4 room filter"
+
+    def test_matches_with_price_filters_no_price_filters(self, sample_apartment_ad):
+        """Test matches_with_price_filters when no price filters are provided"""
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.APARTMENT],
+            is_active=True
+        )
+        
+        # No price filters - should match based on other criteria
+        result = filter_obj.matches_with_price_filters(sample_apartment_ad, [])
+        assert result is True
+
+    def test_matches_with_price_filters_matching_price(self, sample_apartment_ad):
+        """Test matches_with_price_filters when price matches"""
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.APARTMENT],
+            is_active=True
+        )
+        
+        # Price filter that matches the ad (250k AMD)
+        price_filters = [
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=200000.0,
+                max_price=300000.0,
+                currency="AMD"
+            )
+        ]
+        
+        result = filter_obj.matches_with_price_filters(sample_apartment_ad, price_filters)
+        assert result is True
+
+    def test_matches_with_price_filters_non_matching_price(self, sample_apartment_ad):
+        """Test matches_with_price_filters when price doesn't match"""
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.APARTMENT],
+            is_active=True
+        )
+        
+        # Price filter that doesn't match the ad (250k AMD)
+        price_filters = [
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=500000.0,
+                max_price=600000.0,
+                currency="AMD"
+            )
+        ]
+        
+        result = filter_obj.matches_with_price_filters(sample_apartment_ad, price_filters)
+        assert result is False
+
+    def test_matches_with_price_filters_multiple_currencies(self, sample_apartment_ad):
+        """Test matches_with_price_filters with multiple currency filters"""
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.APARTMENT],
+            is_active=True
+        )
+        
+        # Multiple price filters - one should match
+        price_filters = [
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=500000.0,
+                max_price=600000.0,
+                currency="AMD"  # This won't match
+            ),
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=200.0,
+                max_price=300.0,
+                currency="USD"  # This won't match either
+            ),
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=200000.0,
+                max_price=300000.0,
+                currency="AMD"  # This should match
+            )
+        ]
+        
+        result = filter_obj.matches_with_price_filters(sample_apartment_ad, price_filters)
+        assert result is True
+
+    def test_matches_with_price_filters_no_price_in_ad(self, sample_apartment_ad):
+        """Test matches_with_price_filters when ad has no price"""
+        # Create ad without price
+        ad_no_price = RealEstateAd(
+            original_post_id=1,
+            original_channel_id=12345,
+            original_message="Test apartment",
+            property_type=PropertyType.APARTMENT,
+            rental_type=RentalType.LONG_TERM,
+            rooms_count=2,
+            area_sqm=60,
+            price=None,  # No price
+            currency=None,  # No currency
+            district="Центр",
+            city="Ереван",
+            has_balcony=True,
+            parsing_confidence=0.9,
+        )
+        
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.APARTMENT],
+            is_active=True
+        )
+        
+        price_filters = [
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=200000.0,
+                max_price=300000.0,
+                currency="AMD"
+            )
+        ]
+        
+        result = filter_obj.matches_with_price_filters(ad_no_price, price_filters)
+        assert result is False
+
+    def test_matches_with_price_filters_filter_doesnt_match_other_criteria(self, sample_apartment_ad):
+        """Test matches_with_price_filters when filter doesn't match other criteria"""
+        filter_obj = SimpleFilter(
+            name="Test Filter", 
+            user_id=123456789, 
+            property_types=[PropertyType.HOUSE],  # Different property type
+            is_active=True
+        )
+        
+        price_filters = [
+            PriceFilter(
+                filter_id="test_filter_123",
+                min_price=200000.0,
+                max_price=300000.0,
+                currency="AMD"
+            )
+        ]
+        
+        result = filter_obj.matches_with_price_filters(sample_apartment_ad, price_filters)
+        assert result is False  # Should fail on property type before checking price
 
 
 if __name__ == "__main__":

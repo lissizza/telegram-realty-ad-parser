@@ -44,6 +44,7 @@ class TestArchitectureIntegration:
         """Sample filter with new fields"""
         return SimpleFilter(
             name="2-3 Room Apartment in Center",
+            user_id=123456789,
             property_types=[PropertyType.APARTMENT],
             rental_types=[RentalType.LONG_TERM],
             min_rooms=2,

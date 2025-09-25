@@ -1,416 +1,276 @@
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
-
+#!/usr/bin/env python3
+"""
+Tests for user channel subscription service
+"""
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
+from datetime import datetime
 
-from app.models.user_channel_subscription import (
-    UserChannelSubscriptionCreate,
-    UserChannelSubscriptionResponse,
-)
-from app.services.user_channel_subscription_service import (
-    UserChannelSubscriptionService,
-)
+from app.services.user_channel_subscription_service import UserChannelSubscriptionService
+from app.models.user_channel_subscription import UserChannelSubscriptionCreate, UserChannelSubscriptionResponse
+from tests.test_utils import generate_test_subscription_data, generate_test_channel_info, generate_random_channel_name
 
 
 class TestUserChannelSubscriptionService:
-    """Test cases for UserChannelSubscriptionService"""
+    """Test class for user channel subscription service"""
 
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.service = UserChannelSubscriptionService()
+    @pytest.fixture
+    def service(self):
+        """Create service instance"""
+        return UserChannelSubscriptionService()
 
-    def test_parse_channel_input_tme_url_with_topic(self):
-        """Test parsing t.me URL with topic"""
-        channel_input = "https://t.me/rent_comissionfree/2629"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username == "rent_comissionfree"
-        assert topic_id == 2629
-        assert link == "https://t.me/rent_comissionfree/2629"
-        assert channel_id is None
-        assert topic_title is None
-
-    def test_parse_channel_input_tme_url_without_topic(self):
-        """Test parsing t.me URL without topic"""
-        channel_input = "https://t.me/rent_comissionfree"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username == "rent_comissionfree"
-        assert topic_id is None
-        assert link == "https://t.me/rent_comissionfree"
-        assert channel_id is None
-        assert topic_title is None
-
-    def test_parse_channel_input_short_url(self):
-        """Test parsing short t.me URL"""
-        channel_input = "t.me/channel_name"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username == "channel_name"
-        assert topic_id is None
-        assert link == "https://t.me/channel_name"
-        assert channel_id is None
-        assert topic_title is None
-
-    def test_parse_channel_input_username_with_at(self):
-        """Test parsing username with @ prefix"""
-        channel_input = "@channel_name"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username == "channel_name"
-        assert topic_id is None
-        assert link == "https://t.me/channel_name"
-        assert channel_id is None
-        assert topic_title is None
-
-    def test_parse_channel_input_username_without_at(self):
-        """Test parsing username without @ prefix"""
-        channel_input = "channel_name"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username == "channel_name"
-        assert topic_id is None
-        assert link == "https://t.me/channel_name"
-        assert channel_id is None
-        assert topic_title is None
-
-    def test_parse_channel_input_channel_id(self):
-        """Test parsing channel ID"""
-        channel_input = "-1001827102719"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username is None
-        assert topic_id is None
-        assert link is None
-        assert channel_id == -1001827102719
-        assert topic_title is None
-
-    def test_parse_channel_input_channel_id_with_topic(self):
-        """Test parsing channel ID with topic"""
-        channel_input = "-1001827102719:2629"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username is None
-        assert topic_id == 2629
-        assert link is None
-        assert channel_id == -1001827102719
-        assert topic_title is None
-
-    def test_parse_channel_input_positive_channel_id(self):
-        """Test parsing positive channel ID"""
-        channel_input = "1001827102719"
-        
-        username, topic_id, link, channel_id, topic_title = self.service._parse_channel_input(channel_input)
-        
-        assert username is None
-        assert topic_id is None
-        assert link is None
-        assert channel_id == 1001827102719
-        assert topic_title is None
-
-    @pytest.mark.asyncio
-    async def test_create_subscription_success_with_username(self):
-        """Test successful subscription creation with username"""
-        # Mock database
+    @pytest.fixture
+    def mock_db(self):
+        """Mock database"""
         mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock find_one to return None (no existing subscription)
-        mock_collection.find_one.return_value = None
-        
-        # Mock insert_one to return success
-        mock_result = MagicMock()
-        mock_result.inserted_id = "507f1f77bcf86cd799439011"
-        mock_collection.insert_one.return_value = mock_result
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            subscription_data = UserChannelSubscriptionCreate(
-                user_id=123,
-                channel_input="@test_channel"
-            )
-            
-            result = await self.service.create_subscription(subscription_data)
-            
-            assert result == "507f1f77bcf86cd799439011"
-            mock_collection.find_one.assert_called_once()
-            mock_collection.insert_one.assert_called_once()
+        mock_db.user_channel_subscriptions = MagicMock()
+        return mock_db
 
-    @pytest.mark.asyncio
-    async def test_create_subscription_success_with_channel_id(self):
-        """Test successful subscription creation with channel ID"""
+    @pytest.fixture
+    def mock_subscription_data(self):
+        """Mock subscription data with random values"""
+        return generate_test_subscription_data(
+            user_id=123456789,
+            channel_id="-1001827102719",
+            channel_username="@test_channel_1",
+            topic_id=2629
+        )
+
+    @pytest.fixture
+    def mock_channel_info(self):
+        """Mock channel info from resolver with random values"""
+        return generate_test_channel_info(
+            channel_id=-1001827102719,
+            channel_username="@test_channel_1",
+            topic_id=2629
+        )
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_get_all_active_subscriptions_success(self, mock_mongodb, service, mock_db, mock_subscription_data):
+        """Test successful retrieval of all active subscriptions"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock find_one to return None (no existing subscription)
-        mock_collection.find_one.return_value = None
-        
-        # Mock insert_one to return success
-        mock_result = MagicMock()
-        mock_result.inserted_id = "507f1f77bcf86cd799439012"
-        mock_collection.insert_one.return_value = mock_result
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            subscription_data = UserChannelSubscriptionCreate(
-                user_id=123,
-                channel_input="-1001827102719"
-            )
-            
-            result = await self.service.create_subscription(subscription_data)
-            
-            assert result == "507f1f77bcf86cd799439012"
-            mock_collection.find_one.assert_called_once()
-            mock_collection.insert_one.assert_called_once()
+        mock_mongodb.get_database.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_cursor.__aiter__.return_value = [mock_subscription_data]
+        mock_db.user_channel_subscriptions.find.return_value = mock_cursor
 
-    @pytest.mark.asyncio
-    async def test_create_subscription_existing_subscription(self):
-        """Test creating subscription when one already exists"""
+        # Call method
+        result = await service.get_all_active_subscriptions()
+
+        # Assertions
+        assert len(result) == 1
+        assert isinstance(result[0], UserChannelSubscriptionResponse)
+        assert result[0].user_id == 123456789
+        assert result[0].channel_username == "@test_channel_1"
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_get_all_active_subscriptions_empty(self, mock_mongodb, service, mock_db):
+        """Test retrieval of active subscriptions when none exist"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock find_one to return existing subscription
-        existing_subscription = {"_id": "507f1f77bcf86cd799439011", "user_id": 123}
-        mock_collection.find_one.return_value = existing_subscription
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            subscription_data = UserChannelSubscriptionCreate(
-                user_id=123,
-                channel_input="@test_channel"
-            )
-            
-            result = await self.service.create_subscription(subscription_data)
-            
-            assert result == "507f1f77bcf86cd799439011"
-            mock_collection.find_one.assert_called_once()
-            mock_collection.insert_one.assert_not_called()
+        mock_mongodb.get_database.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_cursor.__aiter__.return_value = []
+        mock_db.user_channel_subscriptions.find.return_value = mock_cursor
 
-    @pytest.mark.asyncio
-    async def test_create_subscription_invalid_input(self):
-        """Test creating subscription with invalid input"""
-        with patch.object(self.service, '_get_db', side_effect=Exception("Database error")):
-            subscription_data = UserChannelSubscriptionCreate(
-                user_id=123,
-                channel_input=""
-            )
-            
-            result = await self.service.create_subscription(subscription_data)
-            
-            assert result is None
+        # Call method
+        result = await service.get_all_active_subscriptions()
 
-    @pytest.mark.asyncio
-    async def test_get_user_subscriptions_success(self):
-        """Test getting user subscriptions successfully"""
+        # Assertions
+        assert result == []
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_get_all_active_subscriptions_database_error(self, mock_mongodb, service, mock_db):
+        """Test handling of database errors"""
+        # Mock database to raise exception
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.find.side_effect = Exception("Database error")
+
+        # Call method
+        result = await service.get_all_active_subscriptions()
+
+        # Assertions
+        assert result == []
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    @patch.object(UserChannelSubscriptionService, '_resolve_channel_info')
+    @patch.object(UserChannelSubscriptionService, '_get_topic_title')
+    async def test_create_subscription_success(self, mock_get_topic_title, mock_resolve_channel_info, 
+                                             mock_mongodb, service, mock_db, mock_channel_info):
+        """Test successful subscription creation"""
+        # Mock dependencies
+        mock_mongodb.get_database.return_value = mock_db
+        mock_resolve_channel_info.return_value = mock_channel_info
+        mock_get_topic_title.return_value = "Test Topic"
+        
+        # Mock database operations
+        mock_db.user_channel_subscriptions.find_one.return_value = None  # No existing subscription
+        mock_db.user_channel_subscriptions.insert_one.return_value = MagicMock(inserted_id="new_id")
+
+        # Generate random channel name for testing
+        test_channel = generate_random_channel_name()
+        
+        # Create subscription data
+        subscription_data = UserChannelSubscriptionCreate(
+            user_id=123456789,
+            channel_input=f"@{test_channel}",
+            topic_id=None
+        )
+
+        # Call method
+        result = await service.create_subscription(subscription_data)
+
+        # Assertions
+        assert result == "new_id"
+        mock_resolve_channel_info.assert_called_once_with(f"@{test_channel}")
+        mock_get_topic_title.assert_called_once_with(-1001827102719, 2629)
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    @patch.object(UserChannelSubscriptionService, '_resolve_channel_info')
+    async def test_create_subscription_duplicate(self, mock_resolve_channel_info, mock_mongodb, 
+                                               service, mock_db, mock_channel_info):
+        """Test handling of duplicate subscription"""
+        # Mock dependencies
+        mock_mongodb.get_database.return_value = mock_db
+        mock_resolve_channel_info.return_value = mock_channel_info
+        
+        # Mock database to return existing subscription
+        mock_db.user_channel_subscriptions.find_one.return_value = {"_id": "existing_id"}
+
+        # Generate random channel name for testing
+        test_channel = generate_random_channel_name()
+        
+        # Create subscription data
+        subscription_data = UserChannelSubscriptionCreate(
+            user_id=123456789,
+            channel_input=f"@{test_channel}",
+            topic_id=None
+        )
+
+        # Call method and expect ValueError
+        with pytest.raises(ValueError, match="У вас уже есть подписка на канал"):
+            await service.create_subscription(subscription_data)
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    @patch.object(UserChannelSubscriptionService, '_resolve_channel_info')
+    async def test_create_subscription_channel_not_found(self, mock_resolve_channel_info, mock_mongodb, service):
+        """Test handling of channel not found"""
+        # Mock dependencies
+        mock_resolve_channel_info.return_value = None
+
+        # Create subscription data
+        subscription_data = UserChannelSubscriptionCreate(
+            user_id=123456789,
+            channel_input="@nonexistent_channel",
+            topic_id=None
+        )
+
+        # Call method
+        result = await service.create_subscription(subscription_data)
+
+        # Assertions
+        assert result is None
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    @patch.object(UserChannelSubscriptionService, '_resolve_channel_info')
+    async def test_create_subscription_resolve_error(self, mock_resolve_channel_info, mock_mongodb, service):
+        """Test handling of channel resolution error"""
+        # Mock dependencies
+        mock_resolve_channel_info.side_effect = ValueError("Канал не найден")
+
+        # Generate random channel name for testing
+        test_channel = generate_random_channel_name()
+        
+        # Create subscription data
+        subscription_data = UserChannelSubscriptionCreate(
+            user_id=123456789,
+            channel_input=f"@{test_channel}",
+            topic_id=None
+        )
+
+        # Call method and expect ValueError to be re-raised
+        with pytest.raises(ValueError, match="Канал не найден"):
+            await service.create_subscription(subscription_data)
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_get_user_subscriptions_success(self, mock_mongodb, service, mock_db, mock_subscription_data):
+        """Test successful retrieval of user subscriptions"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock cursor with subscriptions
-        mock_subscriptions = [
-            {
-                "_id": "507f1f77bcf86cd799439011",
-                "user_id": 123,
-                "channel_username": "test_channel",
-                "channel_title": "Test Channel",
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        ]
-        
-        # Create async iterator for cursor
-        class MockCursor:
-            def __init__(self, docs):
-                self.docs = docs
-            
-            def __aiter__(self):
-                return self
-            
-            async def __anext__(self):
-                if not self.docs:
-                    raise StopAsyncIteration
-                return self.docs.pop(0)
-        
-        mock_collection.find.return_value = MockCursor(mock_subscriptions.copy())
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.get_user_subscriptions(123)
-            
-            assert len(result) == 1
-            assert isinstance(result[0], UserChannelSubscriptionResponse)
-            assert result[0].id == "507f1f77bcf86cd799439011"
-            assert result[0].user_id == 123
+        mock_mongodb.get_database.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_cursor.__aiter__.return_value = [mock_subscription_data]
+        mock_db.user_channel_subscriptions.find.return_value = mock_cursor
 
-    @pytest.mark.asyncio
-    async def test_get_active_user_subscriptions(self):
-        """Test getting active user subscriptions"""
+        # Call method
+        result = await service.get_user_subscriptions(123456789)
+
+        # Assertions
+        assert len(result) == 1
+        assert isinstance(result[0], UserChannelSubscriptionResponse)
+        assert result[0].user_id == 123456789
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_get_user_subscriptions_database_error(self, mock_mongodb, service, mock_db):
+        """Test handling of database errors in get_user_subscriptions"""
+        # Mock database to raise exception
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.find.side_effect = Exception("Database error")
+
+        # Call method
+        result = await service.get_user_subscriptions(123456789)
+
+        # Assertions
+        assert result == []
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_toggle_subscription_active_success(self, mock_mongodb, service, mock_db):
+        """Test successful subscription status toggle"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock cursor with active subscriptions
-        mock_subscriptions = [
-            {
-                "_id": "507f1f77bcf86cd799439011",
-                "user_id": 123,
-                "channel_username": "test_channel",
-                "channel_title": "Test Channel",
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        ]
-        
-        # Create async iterator for cursor
-        class MockCursor:
-            def __init__(self, docs):
-                self.docs = docs
-            
-            def __aiter__(self):
-                return self
-            
-            async def __anext__(self):
-                if not self.docs:
-                    raise StopAsyncIteration
-                return self.docs.pop(0)
-        
-        mock_collection.find.return_value = MockCursor(mock_subscriptions.copy())
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.get_active_user_subscriptions(123)
-            
-            assert len(result) == 1
-            assert result[0].is_active is True
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.update_one.return_value = MagicMock(modified_count=1)
 
-    @pytest.mark.asyncio
-    async def test_toggle_subscription_active_success(self):
-        """Test toggling subscription active status"""
+        # Call method
+        result = await service.toggle_subscription_active("507f1f77bcf86cd799439011")
+
+        # Assertions
+        assert result is True
+        mock_db.user_channel_subscriptions.update_one.assert_called_once()
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_toggle_subscription_active_not_found(self, mock_mongodb, service, mock_db):
+        """Test subscription status toggle when subscription not found"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock find_one to return subscription
-        existing_subscription = {
-            "_id": "507f1f77bcf86cd799439011",
-            "is_active": True,
-            "user_id": 123
-        }
-        mock_collection.find_one.return_value = existing_subscription
-        
-        # Mock update_one to return success
-        mock_result = MagicMock()
-        mock_result.modified_count = 1
-        mock_collection.update_one.return_value = mock_result
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.toggle_subscription_active("507f1f77bcf86cd799439011")
-            
-            assert result is True
-            mock_collection.update_one.assert_called_once()
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.update_one.return_value = MagicMock(modified_count=0)
 
-    @pytest.mark.asyncio
-    async def test_toggle_subscription_not_found(self):
-        """Test toggling non-existent subscription"""
-        # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock find_one to return None (subscription not found)
-        mock_collection.find_one.return_value = None
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.toggle_subscription_active("507f1f77bcf86cd799439011")
-            
-            assert result is False
-            mock_collection.update_one.assert_not_called()
+        # Call method
+        result = await service.toggle_subscription_active("507f1f77bcf86cd799439011")
 
-    @pytest.mark.asyncio
-    async def test_delete_subscription_success(self):
-        """Test deleting subscription successfully"""
-        # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock delete_one to return success
-        mock_result = MagicMock()
-        mock_result.deleted_count = 1
-        mock_collection.delete_one.return_value = mock_result
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.delete_subscription("507f1f77bcf86cd799439011")
-            
-            assert result is True
-            mock_collection.delete_one.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_subscription_invalid_id(self):
-        """Test deleting subscription with invalid ID"""
-        result = await self.service.delete_subscription("invalid_id")
+        # Assertions
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_get_all_active_subscriptions(self):
-        """Test getting all active subscriptions"""
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_delete_subscription_success(self, mock_mongodb, service, mock_db):
+        """Test successful subscription deletion"""
         # Mock database
-        mock_db = MagicMock()
-        mock_collection = AsyncMock()
-        mock_db.user_channel_subscriptions = mock_collection
-        
-        # Mock cursor with active subscriptions
-        mock_subscriptions = [
-            {
-                "_id": "507f1f77bcf86cd799439011",
-                "user_id": 123,
-                "channel_id": -1001827102719,
-                "channel_title": "Test Channel",
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            },
-            {
-                "_id": "507f1f77bcf86cd799439012",
-                "user_id": 456,
-                "channel_username": "another_channel",
-                "channel_title": "Another Channel",
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        ]
-        
-        # Create async iterator for cursor
-        class MockCursor:
-            def __init__(self, docs):
-                self.docs = docs
-            
-            def __aiter__(self):
-                return self
-            
-            async def __anext__(self):
-                if not self.docs:
-                    raise StopAsyncIteration
-                return self.docs.pop(0)
-        
-        mock_collection.find.return_value = MockCursor(mock_subscriptions.copy())
-        
-        with patch.object(self.service, '_get_db', return_value=mock_db):
-            result = await self.service.get_all_active_subscriptions()
-            
-            assert len(result) == 2
-            assert all(isinstance(sub, UserChannelSubscriptionResponse) for sub in result)
-            assert all(sub.is_active for sub in result)
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.delete_one.return_value = MagicMock(deleted_count=1)
+
+        # Call method
+        result = await service.delete_subscription("507f1f77bcf86cd799439011")
+
+        # Assertions
+        assert result is True
+        mock_db.user_channel_subscriptions.delete_one.assert_called_once()
+
+    @patch('app.services.user_channel_subscription_service.mongodb')
+    async def test_delete_subscription_not_found(self, mock_mongodb, service, mock_db):
+        """Test subscription deletion when subscription not found"""
+        # Mock database
+        mock_mongodb.get_database.return_value = mock_db
+        mock_db.user_channel_subscriptions.delete_one.return_value = MagicMock(deleted_count=0)
+
+        # Call method
+        result = await service.delete_subscription("507f1f77bcf86cd799439011")
+
+        # Assertions
+        assert result is False

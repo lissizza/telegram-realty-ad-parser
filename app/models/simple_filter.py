@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.models.telegram import PropertyType, RentalType
+from app.models.price_filter import PriceFilter
 
 
 class SimpleFilter(BaseModel):
@@ -24,13 +25,14 @@ class SimpleFilter(BaseModel):
     min_area: Optional[float] = Field(None, ge=1.0, le=10000.0)
     max_area: Optional[float] = Field(None, ge=1.0, le=10000.0)
     
-    # Price criteria (generic)
-    min_price: Optional[float] = Field(None, ge=0.0)
-    max_price: Optional[float] = Field(None, ge=0.0)
-    price_currency: Optional[str] = None  # Filter by specific currency
+    # Price criteria are now handled by separate PriceFilter models
+    # This allows multiple price ranges with different currencies per filter
     
     # Location criteria
     districts: List[str] = []
+    
+    # Channel filtering
+    channel_ids: List[str] = []  # List of channel IDs to filter by (empty = all channels)
     
     # Additional features
     has_balcony: Optional[bool] = None
@@ -46,24 +48,28 @@ class SimpleFilter(BaseModel):
     
     # Status
     is_active: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     def matches(self, ad) -> bool:
         """Check if ad matches this filter"""
         # Property type match
         if self.property_types and ad.property_type not in self.property_types:
+            print(f"DEBUG: Property type mismatch - ad.property_type={ad.property_type}, filter.property_types={self.property_types}")
             return False
         
         # Rental type match
         if self.rental_types and ad.rental_type not in self.rental_types:
+            print(f"DEBUG: Rental type mismatch - ad.rental_type={ad.rental_type}, filter.rental_types={self.rental_types}")
             return False
         
         # Room count match
         if ad.rooms_count is not None:
             if self.min_rooms is not None and ad.rooms_count < self.min_rooms:
+                print(f"DEBUG: Room count too low - ad.rooms_count={ad.rooms_count}, filter.min_rooms={self.min_rooms}")
                 return False
             if self.max_rooms is not None and ad.rooms_count > self.max_rooms:
+                print(f"DEBUG: Room count too high - ad.rooms_count={ad.rooms_count}, filter.max_rooms={self.max_rooms}")
                 return False
         
         # Area match
@@ -73,21 +79,19 @@ class SimpleFilter(BaseModel):
             if self.max_area is not None and ad.area_sqm > self.max_area:
                 return False
         
-        # Price match (generic)
-        if ad.price is not None:
-            # Check currency if specified
-            if self.price_currency and ad.currency != self.price_currency:
-                return False
-            
-            # Check price range
-            if self.min_price is not None and ad.price < self.min_price:
-                return False
-            if self.max_price is not None and ad.price > self.max_price:
-                return False
+        # Price matching is now handled by PriceFilter models
+        # This method will be updated to work with price_filters parameter
         
         # District match
         if self.districts and ad.district:
             if ad.district.lower() not in [d.lower() for d in self.districts]:
+                return False
+        
+        # Channel match
+        if self.channel_ids:
+            # Convert ad.channel_id to string for comparison
+            ad_channel_id = str(ad.original_channel_id)
+            if ad_channel_id not in self.channel_ids:
                 return False
         
         # Feature matches
@@ -107,11 +111,41 @@ class SimpleFilter(BaseModel):
         for feature, required_value in feature_checks:
             if required_value is not None:
                 ad_value = getattr(ad, feature, None)
-                # If filter specifies a value, ad must match exactly
-                if ad_value != required_value:
-                    return False
+                # If filter specifies True, ad must have this feature (True)
+                # If filter specifies False, ad must NOT have this feature (False or None)
+                if required_value is True:
+                    # Ad must have this feature (True)
+                    if ad_value is not True:
+                        print(f"DEBUG: Feature {feature} should be True but ad has {ad_value}")
+                        return False
+                elif required_value is False:
+                    # Ad should not have this feature (False or None is OK)
+                    if ad_value is True:
+                        print(f"DEBUG: Feature {feature} should be False/None but ad has True")
+                        return False
         
         return True
+    
+    def matches_with_price_filters(self, ad, price_filters: List[PriceFilter]) -> bool:
+        """Check if ad matches this filter including price filters"""
+        # First check all non-price criteria
+        if not self.matches(ad):
+            return False
+        
+        # If no price filters, skip price matching
+        if not price_filters:
+            return True
+        
+        # Check if ad price matches any of the price filters
+        if ad.price is not None and ad.currency is not None:
+            for price_filter in price_filters:
+                if price_filter.matches_price(ad.price, ad.currency):
+                    return True
+            # If we have price filters but none matched, return False
+            return False
+        
+        # If ad has no price info, it doesn't match price filters
+        return False
 
 
 

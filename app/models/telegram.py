@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Optional
 from enum import Enum
 
@@ -72,8 +72,8 @@ class RealEstateAd(BaseModel):
     
     # Note: Filter matching is now handled separately via UserFilterMatch model
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ForwardedPost(BaseModel):
@@ -83,8 +83,12 @@ class ForwardedPost(BaseModel):
     original_channel_id: int
     real_estate_ad_id: Optional[str] = None
     filter_id: str
-    forwarded_at: datetime = Field(default_factory=datetime.utcnow)
+    forwarded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: str = "forwarded"  # forwarded, failed, pending
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Channel(BaseModel):
@@ -104,8 +108,8 @@ class Channel(BaseModel):
     is_real_estate_channel: bool = False
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     
     class Config:
         json_encoders = {
