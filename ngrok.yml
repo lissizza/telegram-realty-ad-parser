@@ -12,7 +12,7 @@ tunnels:
     addr: 8001
     subdomain: rent-no-fees-filter
     inspect: true
-    
+
   # Alternative tunnel without subdomain (for backup)
   rent-no-fees-filter-backup:
     proto: http

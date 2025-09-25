@@ -70,9 +70,7 @@ class RealEstateAd(BaseModel):
     parsing_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     parsing_errors: List[str] = []
     
-    # Filter matching metadata
-    matched_filters: List[str] = []  # List of filter IDs that this ad matches
-    should_forward: bool = False  # Whether this ad should be forwarded to user
+    # Note: Filter matching is now handled separately via UserFilterMatch model
     
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -91,10 +89,25 @@ class ForwardedPost(BaseModel):
 
 class Channel(BaseModel):
     """Model for Telegram channels"""
-    id: int
+    id: Optional[str] = None
+    telegram_id: Optional[int] = None  # Telegram channel ID
     title: str
     username: Optional[str] = None
+    channel_link: Optional[str] = None  # Full Telegram link
+    
+    # Topic/Subchannel support
+    has_topics: bool = False
+    default_topic_id: Optional[int] = None  # Default topic to monitor
+    
+    # Monitoring settings
     is_monitored: bool = True
     is_real_estate_channel: bool = False
+    
+    # Metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }

@@ -6,6 +6,7 @@ services:
     volumes:
       - .:/app
       - ./data:/app/data
+      - ./logs:/app/logs         # <— добавлено
     environment:
       - MONGODB_URL=${MONGODB_URL}
       - REDIS_URL=${REDIS_URL}

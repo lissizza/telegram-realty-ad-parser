@@ -39,8 +39,8 @@ RUN poetry install --no-dev --no-interaction --no-ansi
 # Copy project
 COPY . .
 
-# Create data directory
-RUN mkdir -p /app/data
+# Create data and logs directories
+RUN mkdir -p /app/data /app/logs
 
 # Expose port
 EXPOSE 8001

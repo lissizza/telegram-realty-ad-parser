@@ -368,7 +368,41 @@
     </div>
 
     <script>
-        const API_BASE = '/api/v1/simple-filters';
+        // Detect if we're running on mobile (Telegram WebApp) and use ngrok URL
+        const isMobile = window.navigator.userAgent.includes('Mobile') ||
+            (window.Telegram && window.Telegram.WebApp);
+        const API_BASE = isMobile ?
+            'https://perissodactylous-subintegumentary-lianne.ngrok-free.app/api/v1/simple-filters' :
+            'http://localhost:8001/api/v1/simple-filters';
+
+        // Get user ID from Telegram WebApp
+        let currentUserId = null;
+        console.log('Telegram WebApp object:', window.Telegram);
+
+        if (window.Telegram && window.Telegram.WebApp) {
+            console.log('WebApp available:', window.Telegram.WebApp);
+            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
+
+            if (window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+                currentUserId = window.Telegram.WebApp.initDataUnsafe.user.id;
+                console.log('User ID from Telegram:', currentUserId);
+            } else {
+                console.log('No user data in initDataUnsafe');
+            }
+        } else {
+            console.log('Telegram WebApp not available');
+        }
+
+        // If no user ID from Telegram, try to get from URL params or use default
+        if (!currentUserId) {
+            const urlParams = new URLSearchParams(window.location.search);
+            currentUserId = urlParams.get('user_id') || '223720761'; // Default fallback
+            console.log('User ID from URL or default:', currentUserId);
+        }
+
+        console.log('Final currentUserId:', currentUserId);
+        console.log('API_BASE:', API_BASE);
+        console.log('isMobile:', isMobile);
 
         // Global variable to track editing filter
         let editingFilterId = null;
@@ -384,8 +418,20 @@
 
         async function loadFilters() {
             try {
-                const response = await fetch(API_BASE);
+                const url = `${API_BASE}?user_id=${currentUserId}`;
+                console.log('Loading filters from URL:', url);
+                console.log('Current user ID:', currentUserId);
+
+                const response = await fetch(url);
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
                 const filters = await response.json();
+                console.log('Loaded filters:', filters);
 
                 const filtersList = document.getElementById('filtersList');
 
@@ -423,7 +469,17 @@
                 `).join('');
 
             } catch (error) {
-                document.getElementById('filtersList').innerHTML = '<p>Error loading filters: ' + error.message + '</p>';
+                console.error('Error loading filters:', error);
+                document.getElementById('filtersList').innerHTML = `
+                    <div style="color: red; padding: 20px; border: 1px solid red; border-radius: 4px;">
+                        <h3>Error loading filters</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <p><strong>URL:</strong> ${API_BASE}?user_id=${currentUserId}</p>
+                        <p><strong>User ID:</strong> ${currentUserId}</p>
+                        <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+                        <p>Check browser console (F12) for more details.</p>
+                    </div>
+                `;
             }
         }
 
@@ -564,6 +620,11 @@
                 has_garden: formData.get('has_garden') === 'on',
                 has_pool: formData.get('has_pool') === 'on'
             };
+
+            // Add user_id only for new filters
+            if (!editingFilterId) {
+                data.user_id = parseInt(currentUserId);
+            }
 
             // Remove null values
             Object.keys(data).forEach(key => {

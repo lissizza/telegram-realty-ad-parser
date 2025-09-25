@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Telegram WebApp Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .error {
+            color: red;
+        }
+
+        .success {
+            color: green;
+        }
+
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Telegram WebApp Debug Information</h1>
+
+    <div class="section">
+        <h2>1. Telegram WebApp Object</h2>
+        <div id="telegram-info"></div>
+    </div>
+
+    <div class="section">
+        <h2>2. User Information</h2>
+        <div id="user-info"></div>
+    </div>
+
+    <div class="section">
+        <h2>3. API Test</h2>
+        <button onclick="testAPI()">Test API Call</button>
+        <div id="api-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>4. Browser Information</h2>
+        <div id="browser-info"></div>
+    </div>
+
+    <script>
+        // Debug Telegram WebApp
+        function debugTelegram() {
+            const telegramDiv = document.getElementById('telegram-info');
+            const userDiv = document.getElementById('user-info');
+            const browserDiv = document.getElementById('browser-info');
+
+            // Check Telegram WebApp
+            if (window.Telegram) {
+                telegramDiv.innerHTML = '<span class="success">✓ Telegram WebApp object found</span>';
+                telegramDiv.innerHTML += '<pre>' + JSON.stringify(window.Telegram, null, 2) + '</pre>';
+
+                if (window.Telegram.WebApp) {
+                    telegramDiv.innerHTML += '<h3>WebApp Object:</h3>';
+                    telegramDiv.innerHTML += '<pre>' + JSON.stringify(window.Telegram.WebApp, null, 2) + '</pre>';
+
+                    if (window.Telegram.WebApp.initDataUnsafe) {
+                        telegramDiv.innerHTML += '<h3>initDataUnsafe:</h3>';
+                        telegramDiv.innerHTML += '<pre>' + JSON.stringify(window.Telegram.WebApp.initDataUnsafe, null, 2) + '</pre>';
+
+                        if (window.Telegram.WebApp.initDataUnsafe.user) {
+                            userDiv.innerHTML = '<span class="success">✓ User data found</span>';
+                            userDiv.innerHTML += '<pre>' + JSON.stringify(window.Telegram.WebApp.initDataUnsafe.user, null, 2) + '</pre>';
+                        } else {
+                            userDiv.innerHTML = '<span class="error">✗ No user data in initDataUnsafe</span>';
+                        }
+                    } else {
+                        userDiv.innerHTML = '<span class="error">✗ No initDataUnsafe</span>';
+                    }
+                } else {
+                    telegramDiv.innerHTML += '<span class="error">✗ No WebApp object</span>';
+                }
+            } else {
+                telegramDiv.innerHTML = '<span class="error">✗ Telegram WebApp object not found</span>';
+            }
+
+            // Browser info
+            browserDiv.innerHTML = `
+                <p><strong>User Agent:</strong> ${navigator.userAgent}</p>
+                <p><strong>URL:</strong> ${window.location.href}</p>
+                <p><strong>Protocol:</strong> ${window.location.protocol}</p>
+                <p><strong>Host:</strong> ${window.location.host}</p>
+                <p><strong>Origin:</strong> ${window.location.origin}</p>
+            `;
+        }
+
+        // Test API
+        async function testAPI() {
+            const resultDiv = document.getElementById('api-result');
+            resultDiv.innerHTML = 'Testing API...';
+
+            // Use ngrok URL for mobile, localhost for desktop
+            const isMobile = window.navigator.userAgent.includes('Mobile') ||
+                (window.Telegram && window.Telegram.WebApp);
+            const apiUrl = isMobile ?
+                'https://perissodactylous-subintegumentary-lianne.ngrok-free.app/api/v1/simple-filters/' :
+                'http://localhost:8001/api/v1/simple-filters/';
+
+            resultDiv.innerHTML += `<p>Testing URL: ${apiUrl}</p>`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `
+                        <span class="success">✓ API call successful</span>
+                        <p>Found ${data.length} filters</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<span class="error">✗ API error: ${response.status} ${response.statusText}</span>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">✗ Fetch error: ${error.message}</span>`;
+            }
+        }
+
+        // Run debug on page load
+        window.onload = debugTelegram;
+    </script>
+</body>
+
+</html>
+
+
+
+
+
+
+
+

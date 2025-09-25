@@ -1,6 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import posts, channels, telegram, real_estate, search_settings, static, ngrok, statistics, simple_filters
+from app.api.v1.endpoints import (
+    posts, channels, telegram, real_estate, search_settings, static, ngrok, 
+    statistics, simple_filters, user_filter_matches, user_channel_subscriptions
+)
 
 api_router = APIRouter()
 api_router.include_router(
@@ -29,4 +32,10 @@ api_router.include_router(
 )
 api_router.include_router(
     simple_filters.router, prefix="/simple-filters", tags=["simple-filters"]
+)
+api_router.include_router(
+    user_filter_matches.router, prefix="/user-filter-matches", tags=["user-filter-matches"]
+)
+api_router.include_router(
+    user_channel_subscriptions.router, prefix="/user-channel-subscriptions", tags=["user-channel-subscriptions"]
 )

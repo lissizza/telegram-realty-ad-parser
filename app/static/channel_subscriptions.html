@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление подписками на каналы</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: var(--tg-theme-text-color, #000000);
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: var(--tg-theme-hint-color, #666666);
+            font-size: 14px;
+        }
+
+        .section {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--tg-theme-hint-color, #ddd);
+            border-radius: 8px;
+            font-size: 16px;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color, #007bff);
+        }
+
+        .btn {
+            background: var(--tg-theme-button-color, #007bff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--tg-theme-secondary-bg-color, #6c757d);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 14px;
+            width: auto;
+            margin-right: 10px;
+            margin-bottom: 5px;
+        }
+
+        .subscription-item {
+            background: var(--tg-theme-bg-color, #ffffff);
+            border: 1px solid var(--tg-theme-hint-color, #ddd);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .subscription-info h3 {
+            color: var(--tg-theme-text-color, #000000);
+            margin-bottom: 5px;
+        }
+
+        .subscription-info p {
+            color: var(--tg-theme-hint-color, #666666);
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .subscription-actions {
+            margin-top: 15px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-active {
+            background: #28a745;
+        }
+
+        .status-inactive {
+            background: #dc3545;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--tg-theme-hint-color, #666666);
+        }
+
+        .examples {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .examples h4 {
+            margin-bottom: 10px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .examples p {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #666666);
+            margin-bottom: 5px;
+        }
+
+        .examples code {
+            background: var(--tg-theme-bg-color, #ffffff);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📺 Управление каналами</h1>
+            <p>Добавляйте каналы для мониторинга объявлений о недвижимости</p>
+        </div>
+
+        <div class="section">
+            <h2>Добавить канал</h2>
+            <div class="form-group">
+                <label for="channelInput">Ссылка на канал или username:</label>
+                <input type="text" id="channelInput" placeholder="https://t.me/rent_comissionfree/2629 или @rent_comissionfree">
+            </div>
+            
+            <div class="examples">
+                <h4>Примеры:</h4>
+                <p><code>@rent_comissionfree</code> - обычный канал</p>
+                <p><code>https://t.me/rent_comissionfree/2629</code> - канал с конкретным топиком</p>
+                <p><code>rent_comissionfree</code> - просто username без @</p>
+            </div>
+
+            <button class="btn" onclick="addChannel()">Добавить канал</button>
+        </div>
+
+        <div class="section">
+            <h2>Мои подписки</h2>
+            <div id="subscriptionsList" class="loading">Загрузка подписок...</div>
+        </div>
+    </div>
+
+    <script>
+        // Detect if we're running on mobile (Telegram WebApp) and use ngrok URL
+        const isMobile = window.navigator.userAgent.includes('Mobile') || 
+                        (window.Telegram && window.Telegram.WebApp);
+        const API_BASE = isMobile ? 
+            'https://perissodactylous-subintegumentary-lianne.ngrok-free.app/api/v1/user-channel-subscriptions' :
+            'http://localhost:8001/api/v1/user-channel-subscriptions';
+
+        // Get user ID from Telegram WebApp
+        let currentUserId = null;
+        console.log('Telegram WebApp object:', window.Telegram);
+        
+        if (window.Telegram && window.Telegram.WebApp) {
+            console.log('WebApp available:', window.Telegram.WebApp);
+            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
+            
+            if (window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+                currentUserId = window.Telegram.WebApp.initDataUnsafe.user.id;
+                console.log('User ID from Telegram:', currentUserId);
+            } else {
+                console.log('No user data in initDataUnsafe');
+            }
+        } else {
+            console.log('Telegram WebApp not available');
+        }
+
+        // If no user ID from Telegram, try to get from URL params or use default
+        if (!currentUserId) {
+            const urlParams = new URLSearchParams(window.location.search);
+            currentUserId = urlParams.get('user_id') || '223720761'; // Default fallback
+            console.log('User ID from URL or default:', currentUserId);
+        }
+        
+        console.log('Final currentUserId:', currentUserId);
+        console.log('API_BASE:', API_BASE);
+        console.log('isMobile:', isMobile);
+
+        // Load subscriptions on page load
+        document.addEventListener('DOMContentLoaded', loadSubscriptions);
+
+        async function loadSubscriptions() {
+            try {
+                const url = `${API_BASE}/?user_id=${currentUserId}`;
+                console.log('Loading subscriptions from URL:', url);
+                
+                const response = await fetch(url);
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const subscriptions = await response.json();
+                console.log('Loaded subscriptions:', subscriptions);
+                
+                renderSubscriptions(subscriptions);
+                
+            } catch (error) {
+                console.error('Error loading subscriptions:', error);
+                document.getElementById('subscriptionsList').innerHTML = `
+                    <div class="error">
+                        <h3>Ошибка загрузки подписок</h3>
+                        <p><strong>Ошибка:</strong> ${error.message}</p>
+                        <p><strong>URL:</strong> ${API_BASE}/?user_id=${currentUserId}</p>
+                        <p><strong>User ID:</strong> ${currentUserId}</p>
+                        <p>Проверьте консоль браузера (F12) для подробностей.</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderSubscriptions(subscriptions) {
+            const subscriptionsList = document.getElementById('subscriptionsList');
+            
+            if (subscriptions.length === 0) {
+                subscriptionsList.innerHTML = '<p>У вас пока нет подписок на каналы.</p>';
+                return;
+            }
+
+            const html = subscriptions.map(subscription => `
+                <div class="subscription-item">
+                    <div class="subscription-info">
+                        <h3>
+                            <span class="status-indicator ${subscription.is_active ? 'status-active' : 'status-inactive'}"></span>
+                            ${subscription.channel_title || subscription.channel_username}
+                        </h3>
+                        <p><strong>Канал:</strong> @${subscription.channel_username}</p>
+                        ${subscription.topic_id ? `<p><strong>Топик:</strong> ${subscription.topic_id}</p>` : ''}
+                        <p><strong>Статус:</strong> ${subscription.is_active ? 'Активен' : 'Неактивен'}</p>
+                        ${subscription.channel_link ? `<p><strong>Ссылка:</strong> <a href="${subscription.channel_link}" target="_blank">${subscription.channel_link}</a></p>` : ''}
+                    </div>
+                    <div class="subscription-actions">
+                        <button class="btn btn-small btn-secondary" onclick="toggleSubscription('${subscription.id}', ${subscription.is_active})">
+                            ${subscription.is_active ? 'Деактивировать' : 'Активировать'}
+                        </button>
+                        <button class="btn btn-small btn-danger" onclick="deleteSubscription('${subscription.id}')">
+                            Удалить
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+
+            subscriptionsList.innerHTML = html;
+        }
+
+        async function addChannel() {
+            const channelInput = document.getElementById('channelInput').value.trim();
+            
+            if (!channelInput) {
+                showMessage('Введите ссылку на канал или username', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/quick-add`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        channel_input: channelInput
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                showMessage('Канал успешно добавлен!', 'success');
+                document.getElementById('channelInput').value = '';
+                loadSubscriptions(); // Reload the list
+                
+            } catch (error) {
+                console.error('Error adding channel:', error);
+                showMessage(`Ошибка добавления канала: ${error.message}`, 'error');
+            }
+        }
+
+        async function toggleSubscription(subscriptionId, currentStatus) {
+            try {
+                const response = await fetch(`${API_BASE}/${subscriptionId}/toggle`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                showMessage('Статус подписки изменен', 'success');
+                loadSubscriptions(); // Reload the list
+                
+            } catch (error) {
+                console.error('Error toggling subscription:', error);
+                showMessage(`Ошибка изменения статуса: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteSubscription(subscriptionId) {
+            if (!confirm('Вы уверены, что хотите удалить эту подписку?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/${subscriptionId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                showMessage('Подписка удалена', 'success');
+                loadSubscriptions(); // Reload the list
+                
+            } catch (error) {
+                console.error('Error deleting subscription:', error);
+                showMessage(`Ошибка удаления: ${error.message}`, 'error');
+            }
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type;
+            messageDiv.textContent = message;
+            
+            const container = document.querySelector('.container');
+            container.insertBefore(messageDiv, container.firstChild);
+            
+            // Remove message after 3 seconds
+            setTimeout(() => {
+                if (messageDiv.parentNode) {
+                    messageDiv.parentNode.removeChild(messageDiv);
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+

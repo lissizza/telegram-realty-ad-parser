@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
@@ -49,31 +49,43 @@ class TelegramService:
 
             await self.client.start(phone=settings.TELEGRAM_PHONE)
 
-            # Register event handlers for channels
-            monitored_channels = self._get_monitored_channels()
+            # Get monitored channels from user subscriptions
+            user_channels = await self._get_user_monitored_channels()
+            
+            # Fallback to legacy channels if no user subscriptions
+            if not user_channels:
+                monitored_channels = self._get_monitored_channels()
+                if monitored_channels:
+                    logger.info("Using legacy monitored channels: %s", monitored_channels)
+                    
+                    @self.client.on(events.NewMessage(chats=monitored_channels))
+                    async def handle_new_message_legacy(event: events.NewMessage.Event) -> None:
+                        # Process only messages from main topic (reply_to_msg_id=2629)
+                        # Skip all other subchannels
+                        message = event.message
+                        rt = getattr(message, "reply_to", None)
+                        reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
 
-            if monitored_channels:
+                        logger.info("Message %s: reply_to=%s, reply_to_msg_id=%s", message.id, rt, reply_to_msg_id)
 
-                @self.client.on(events.NewMessage(chats=monitored_channels))
-                async def handle_new_message(event: events.NewMessage.Event) -> None:
-                    # Process only messages from main topic (reply_to_msg_id=2629)
-                    # Skip all other subchannels
-                    message = event.message
-                    rt = getattr(message, "reply_to", None)
-                    reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
-
-                    logger.info("Message %s: reply_to=%s, reply_to_msg_id=%s", message.id, rt, reply_to_msg_id)
-
-                    if rt and reply_to_msg_id == 2629:
-                        # Message from main topic with real estate ads, process it
-                        logger.info("Message %s from main topic (reply_to_msg_id=2629), processing", message.id)
-                    else:
-                        # Message from other subchannels or no reply_to, skip it
-                        logger.info(
-                            "Message %s from subchannel %s or no reply_to, skipping", message.id, reply_to_msg_id
-                        )
-                        return
-                    await self._process_message(event.message)
+                        if rt and reply_to_msg_id == 2629:
+                            # Message from main topic with real estate ads, process it
+                            logger.info("Message %s from main topic (reply_to_msg_id=2629), processing", message.id)
+                        else:
+                            # Message from other subchannels or no reply_to, skip it
+                            logger.info(
+                                "Message %s from subchannel %s or no reply_to, skipping", message.id, reply_to_msg_id
+                            )
+                            return
+                        await self._process_message(event.message)
+            else:
+                # Use user subscriptions for monitoring
+                channel_ids = list(user_channels.keys())
+                logger.info("Using user monitored channels: %s", channel_ids)
+                
+                @self.client.on(events.NewMessage(chats=channel_ids))
+                async def handle_new_message_user(event: events.NewMessage.Event) -> None:
+                    await self._handle_user_subscription_message(event, user_channels)
 
             self.is_monitoring = True
             logger.info("Started monitoring Telegram channels")
@@ -84,6 +96,74 @@ class TelegramService:
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error starting monitoring: %s", e)
             raise
+
+    async def _handle_user_subscription_message(self, event: events.NewMessage.Event, user_channels: Dict[int, List[Dict]]) -> None:
+        """Handle new message from user subscribed channels"""
+        try:
+            message = event.message
+            chat_id = event.chat_id
+            
+            logger.info("Processing message %s from channel %s", message.id, chat_id)
+            
+            # Get subscriptions for this channel
+            channel_subscriptions = user_channels.get(chat_id, [])
+            if not channel_subscriptions:
+                logger.warning("No subscriptions found for channel %s", chat_id)
+                return
+            
+            # Check if message matches any subscription criteria
+            rt = getattr(message, "reply_to", None)
+            reply_to_msg_id = getattr(rt, "reply_to_msg_id", None) if rt else None
+            
+            logger.info("Message %s: reply_to=%s, reply_to_msg_id=%s", message.id, rt, reply_to_msg_id)
+            
+            # Process message for each matching subscription
+            for subscription in channel_subscriptions:
+                user_id = subscription["user_id"]
+                topic_id = subscription["topic_id"]
+                monitor_all_topics = subscription["monitor_all_topics"]
+                monitored_topics = subscription["monitored_topics"]
+                
+                # Check if message matches subscription criteria
+                should_process = False
+                
+                if monitor_all_topics:
+                    # Monitor all topics in this channel
+                    should_process = True
+                    logger.info("Processing message for user %s (monitor_all_topics=True)", user_id)
+                elif topic_id and reply_to_msg_id == topic_id:
+                    # Monitor specific topic
+                    should_process = True
+                    logger.info("Processing message for user %s (topic_id=%s)", user_id, topic_id)
+                elif monitored_topics and reply_to_msg_id in monitored_topics:
+                    # Monitor specific topics from list
+                    should_process = True
+                    logger.info("Processing message for user %s (monitored_topics=%s)", user_id, monitored_topics)
+                elif not topic_id and not monitored_topics and not monitor_all_topics:
+                    # Monitor main channel (no topic filtering)
+                    should_process = True
+                    logger.info("Processing message for user %s (main channel)", user_id)
+                
+                if should_process:
+                    # Process message for this user
+                    await self._process_message_for_user(message, user_id, subscription)
+                else:
+                    logger.info("Skipping message for user %s (doesn't match criteria)", user_id)
+                    
+        except Exception as e:
+            logger.error("Error handling user subscription message: %s", e)
+
+    async def _process_message_for_user(self, message, user_id: int, subscription: Dict) -> None:
+        """Process message for a specific user"""
+        try:
+            # Use existing _process_message logic
+            # The _process_message method already handles LLM parsing and filter checking
+            # It will create UserFilterMatch records for matching filters automatically
+            await self._process_message(message, force=False)
+            logger.info("Message %s processed for user %s", message.id, user_id)
+                
+        except Exception as e:
+            logger.error("Error processing message for user %s: %s", user_id, e)
 
     async def stop_monitoring(self) -> None:
         """Stop monitoring Telegram channels"""
@@ -201,11 +281,67 @@ class TelegramService:
                 logger.warning("No valid monitored channels found")
                 return []
 
-            logger.info("Monitoring %s channels: %s", len(channel_ids), channel_ids)
+            logger.info("Monitoring %s channels (legacy): %s", len(channel_ids), channel_ids)
             return channel_ids
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error getting monitored channels: %s", e)
             return []
+
+    async def _get_user_monitored_channels(self) -> Dict[int, List[Dict]]:
+        """Get monitored channels from user subscriptions"""
+        try:
+            from app.services.user_channel_subscription_service import (
+                UserChannelSubscriptionService,
+            )
+            
+            subscription_service = UserChannelSubscriptionService()
+            subscriptions = await subscription_service.get_all_active_subscriptions()
+            
+            # Group subscriptions by channel
+            channels = {}
+            for subscription in subscriptions:
+                channel_id = subscription.channel_id
+                if not channel_id:
+                    # Skip subscriptions without channel_id
+                    logger.warning("Subscription %s has no channel_id", subscription.id)
+                    continue
+                
+                # Convert channel_id to integer for Telethon
+                try:
+                    if isinstance(channel_id, str):
+                        if channel_id.startswith("-"):
+                            # Negative channel ID
+                            channel_id_int = int(channel_id)
+                        elif channel_id.startswith("@"):
+                            # Username, skip for now
+                            logger.warning("Username channel %s not supported yet", channel_id)
+                            continue
+                        else:
+                            # Try to parse as integer
+                            channel_id_int = int(channel_id)
+                    else:
+                        channel_id_int = int(channel_id)
+                except (ValueError, TypeError):
+                    logger.warning("Invalid channel_id format: %s", channel_id)
+                    continue
+                
+                if channel_id_int not in channels:
+                    channels[channel_id_int] = []
+                
+                channels[channel_id_int].append({
+                    "user_id": subscription.user_id,
+                    "topic_id": subscription.topic_id,
+                    "monitor_all_topics": subscription.monitor_all_topics,
+                    "monitored_topics": subscription.monitored_topics,
+                    "subscription_id": subscription.id
+                })
+            
+            logger.info("User monitored channels: %s", list(channels.keys()))
+            return channels
+            
+        except Exception as e:
+            logger.error("Error getting user monitored channels: %s", e)
+            return {}
 
     def _get_monitored_subchannels(self) -> List[tuple]:
         """Get list of monitored subchannel (topic) IDs from settings"""
@@ -983,7 +1119,7 @@ class TelegramService:
         return message
 
     async def refilter_ads(self, count: int) -> dict:
-        """Refilter existing ads without reprocessing"""
+        """Refilter existing ads without reprocessing using new UserFilterMatch architecture"""
         try:
             logger.info("Starting refilter for %s ads", count)
 
@@ -1003,12 +1139,16 @@ class TelegramService:
             forwarded = 0
             errors = 0
 
-            # Get user filters
+            # Get all active filters grouped by user
             user_filters_cursor = db.simple_filters.find({"is_active": True})
-            user_filters = []
+            user_filters = {}
             async for filter_doc in user_filters_cursor:
-                user_filters.append(filter_doc)
-            logger.info("Found %s active filters", len(user_filters))
+                user_id = filter_doc.get("user_id")
+                if user_id not in user_filters:
+                    user_filters[user_id] = []
+                user_filters[user_id].append(filter_doc)
+            
+            logger.info("Found filters for %s users", len(user_filters))
 
             if not user_filters:
                 logger.warning("No active filters found")
@@ -1020,6 +1160,12 @@ class TelegramService:
                     "message": "No active filters found",
                 }
 
+            from app.services.simple_filter_service import SimpleFilterService
+            from app.services.user_filter_match_service import UserFilterMatchService
+            
+            filter_service = SimpleFilterService()
+            match_service = UserFilterMatchService()
+
             # Process each ad
             for ad_doc in ads_list:
                 try:
@@ -1028,35 +1174,58 @@ class TelegramService:
                     # Convert to RealEstateAd object
                     ad = RealEstateAd(**ad_doc)
 
-                    # Check against all filters
-                    matched_any_filter = False
-                    for filter_doc in user_filters:
-                        filter_obj = SimpleFilter(**filter_doc)
+                    # Check against all users' filters
+                    for user_id, user_filter_docs in user_filters.items():
+                        matching_filters = []
+                        
+                        for filter_doc in user_filter_docs:
+                            filter_obj = SimpleFilter(**filter_doc)
+                            
+                            if filter_obj.matches(ad):
+                                filter_id = str(filter_obj.id) if filter_obj.id else "unknown"
+                                matching_filters.append(filter_id)
+                                logger.info("Ad %s matched filter %s for user %s", 
+                                           ad.original_post_id, filter_obj.name, user_id)
+                        
+                        # Create UserFilterMatch records for matching filters
+                        if matching_filters:
+                            matched_filters += len(matching_filters)
+                            
+                            for filter_id in matching_filters:
+                                # Create match record
+                                match_id = await match_service.create_match(
+                                    user_id=user_id,
+                                    filter_id=filter_id,
+                                    real_estate_ad_id=ad.id or str(ad_doc["_id"])
+                                )
+                                
+                                if match_id:
+                                    logger.info("Created UserFilterMatch: %s", match_id)
+                                    
+                                    # Forward the ad if not already forwarded for this user
+                                    existing_forward = await db.outgoing_posts.find_one({
+                                        "real_estate_ad_id": ad.id or str(ad_doc["_id"]),
+                                        "sent_to": str(user_id)
+                                    })
+                                    
+                                    if not existing_forward:
+                                        try:
+                                            # Create a mock message object for forwarding
+                                            mock_message = MagicMock()
+                                            mock_message.chat_id = ad.original_channel_id
+                                            mock_message.id = ad.original_post_id
 
-                        if filter_obj.matches(ad):
-                            matched_any_filter = True
-                            matched_filters += 1
-                            logger.info("Ad %s matched filter %s", ad.original_post_id, filter_obj.name)
-
-                            # Forward the ad
-                            try:
-                                # Create a mock message object for forwarding
-                                mock_message = MagicMock()
-                                mock_message.chat_id = ad.original_channel_id
-                                mock_message.id = ad.original_post_id
-
-                                await self._forward_post(mock_message, ad, filter_obj.id or "")
-                                forwarded += 1
-                                logger.info("Ad %s forwarded successfully", ad.original_post_id)
-                            except Exception as e:  # pylint: disable=broad-except
-                                logger.error("Error forwarding ad %s: %s", ad.original_post_id, e)
-                                errors += 1
-
-                            # Only forward to first matching filter
-                            break
-
-                    if not matched_any_filter:
-                        logger.debug("Ad %s did not match any filters", ad.original_post_id)
+                                            await self._forward_post(mock_message, ad, filter_id)
+                                            forwarded += 1
+                                            logger.info("Ad %s forwarded to user %s", ad.original_post_id, user_id)
+                                            
+                                            # Mark match as forwarded
+                                            await match_service.mark_as_forwarded(match_id)
+                                            
+                                        except Exception as e:  # pylint: disable=broad-except
+                                            logger.error("Error forwarding ad %s to user %s: %s", 
+                                                       ad.original_post_id, user_id, e)
+                                            errors += 1
 
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error("Error processing ad %s: %s", ad_doc.get("_id"), e)

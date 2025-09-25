@@ -75,6 +75,12 @@ class TelegramBot:
                     web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    "📺 Управление каналами",
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions"),
+                )
+            ],
             [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
             [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
         ]

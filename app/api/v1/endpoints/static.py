@@ -22,6 +22,11 @@ async def get_simple_filters_page():
     """Serve the simple filters HTML page"""
     return FileResponse(STATIC_DIR / "simple_filters.html")
 
+@router.get("/channel-subscriptions")
+async def get_channel_subscriptions_page():
+    """Serve the channel subscriptions HTML page"""
+    return FileResponse(STATIC_DIR / "channel_subscriptions.html")
+
 @router.get("/")
 async def get_static_files():
     """List available static files"""

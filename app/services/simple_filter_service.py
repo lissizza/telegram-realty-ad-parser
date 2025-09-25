@@ -21,13 +21,17 @@ logger = logging.getLogger(__name__)
 class SimpleFilterService:
     """Service for managing simple filters"""
 
-    async def get_active_filters(self) -> List[SimpleFilter]:
-        """Get all active simple filters"""
+    async def get_active_filters(self, user_id: Optional[int] = None) -> List[SimpleFilter]:
+        """Get all active simple filters, optionally filtered by user"""
         try:
             db = mongodb.get_database()
             filters = []
 
-            async for filter_doc in db.simple_filters.find({"is_active": True}):
+            query = {"is_active": True}
+            if user_id is not None:
+                query["user_id"] = user_id
+
+            async for filter_doc in db.simple_filters.find(query):
                 filter_doc["id"] = str(filter_doc["_id"])
                 filters.append(SimpleFilter(**filter_doc))
 
@@ -51,20 +55,26 @@ class SimpleFilterService:
             logger.error("Error getting filter by ID: %s", e)
             return None
 
-    async def check_filters(self, real_estate_ad: RealEstateAd) -> Dict[str, Any]:
-        """Check if real estate ad matches any active filters"""
+    async def check_filters(self, real_estate_ad: RealEstateAd, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Check if real estate ad matches any active filters for a specific user"""
         try:
-            filters = await self.get_active_filters()
+            from app.services.user_filter_match_service import UserFilterMatchService
+            
+            filters = await self.get_active_filters(user_id)
             matching_filters = []
             filter_details = {}
+            created_matches = []
 
             logger.info(
-                "Checking %s filters for ad: property_type=%s, rooms=%s",
+                "Checking %s filters for ad: property_type=%s, rooms=%s, user_id=%s",
                 len(filters),
                 real_estate_ad.property_type,
                 real_estate_ad.rooms_count,
+                user_id,
             )
 
+            match_service = UserFilterMatchService()
+            
             for filter_obj in filters:
                 logger.info(
                     "Checking filter '%s': property_types=%s, min_rooms=%s, max_rooms=%s",
@@ -78,6 +88,16 @@ class SimpleFilterService:
                     matching_filters.append(filter_id)
                     filter_details[filter_id] = {"name": filter_obj.name, "description": filter_obj.description}
                     logger.info("Filter '%s' MATCHED!", filter_obj.name)
+                    
+                    # Create user filter match record
+                    if user_id and real_estate_ad.id:
+                        match_id = await match_service.create_match(
+                            user_id=user_id,
+                            filter_id=filter_id,
+                            real_estate_ad_id=real_estate_ad.id
+                        )
+                        if match_id:
+                            created_matches.append(match_id)
                 else:
                     logger.info("Filter '%s' did not match", filter_obj.name)
 
@@ -85,11 +105,12 @@ class SimpleFilterService:
                 "matching_filters": matching_filters,
                 "filter_details": filter_details,
                 "should_forward": len(matching_filters) > 0,
+                "created_matches": created_matches,
             }
 
         except Exception as e:
             logger.error("Error checking filters: %s", e)
-            return {"matching_filters": [], "filter_details": {}, "should_forward": False}
+            return {"matching_filters": [], "filter_details": {}, "should_forward": False, "created_matches": []}
 
     async def create_filter(self, filter_data: dict) -> str:
         """Create a new simple filter"""

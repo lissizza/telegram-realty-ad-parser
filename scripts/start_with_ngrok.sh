@@ -42,6 +42,10 @@ cleanup() {
 # Set trap for cleanup
 trap cleanup SIGINT SIGTERM
 
+# Ensure logs dir exists and is writable
+mkdir -p /app/logs
+chmod 755 /app/logs
+
 # Check if ngrok is available
 if ! command -v ngrok &> /dev/null; then
     log_error "Ngrok is not installed in the container"
@@ -55,12 +59,12 @@ fi
 
 # Start ngrok in background
 log_info "Starting ngrok tunnel..."
-if [ -f "ngrok.yml" ]; then
+if [ -f "/app/ngrok.yml" ]; then
     log_info "Using ngrok configuration file"
-    ngrok start rent-no-fees-filter --config ngrok.yml &
+    ngrok start rent-no-fees-filter --config /app/ngrok.yml >>/app/logs/ngrok.log 2>&1 &
 else
     log_info "Using default ngrok configuration"
-    ngrok http 8001 --subdomain rent-no-fees-filter &
+    ngrok http 8001 --subdomain rent-no-fees-filter >>/app/logs/ngrok.log 2>&1 &
 fi
 
 NGROK_PID=$!
@@ -97,5 +101,23 @@ fi
 
 # Start the application
 log_info "Starting application..."
-exec poetry run uvicorn app.main:app --host 0.0.0.0 --port 8001
+# Important: use logging.ini to write uvicorn logs to /app/logs
+exec poetry run uvicorn app.main:app \
+  --host 0.0.0.0 --port 8001 \
+  --access-log \
+  --log-config /app/logging.ini
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

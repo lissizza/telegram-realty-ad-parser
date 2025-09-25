@@ -8,6 +8,7 @@ from app.models.telegram import PropertyType, RentalType
 class SimpleFilter(BaseModel):
     """Simplified filter model for exact field matching"""
     id: Optional[str] = None
+    user_id: int  # Telegram user ID who owns this filter
     name: str
     description: Optional[str] = None
     

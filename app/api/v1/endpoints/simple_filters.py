@@ -1,7 +1,8 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.models.simple_filter import SimpleFilter
@@ -10,7 +11,47 @@ from app.services.simple_filter_service import SimpleFilterService
 router = APIRouter()
 
 
+@router.options("/")
+async def options_simple_filters():
+    """Handle OPTIONS requests for CORS preflight"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+    )
+
+
+@router.options("/{filter_id}")
+async def options_simple_filter_by_id(filter_id: str):
+    """Handle OPTIONS requests for CORS preflight"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+    )
+
+
+@router.options("/{filter_id}/toggle")
+async def options_toggle_filter(filter_id: str):
+    """Handle OPTIONS requests for CORS preflight"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+    )
+
+
 class SimpleFilterCreate(BaseModel):
+    user_id: int
     name: str
     description: Optional[str] = None
     property_types: List[str] = []
@@ -59,9 +100,12 @@ def get_simple_filter_service() -> SimpleFilterService:
 
 
 @router.get("/", response_model=List[SimpleFilter])
-async def get_simple_filters(service: SimpleFilterService = Depends(get_simple_filter_service)):
-    """Get all simple filters"""
-    return await service.get_active_filters()
+async def get_simple_filters(
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
+    service: SimpleFilterService = Depends(get_simple_filter_service)
+):
+    """Get simple filters, optionally filtered by user ID"""
+    return await service.get_active_filters(user_id)
 
 
 @router.get("/{filter_id}", response_model=SimpleFilter)
