@@ -52,6 +52,20 @@ class UserChannelSubscriptionService:
             logger.error("Error resolving channel info for '%s': %s", channel_input, e)
             return None
     
+    async def _get_topic_title(self, channel_id: int, topic_id: int) -> Optional[str]:
+        """Get topic title by channel ID and topic ID"""
+        try:
+            client = await self._get_telegram_client()
+            if not client:
+                logger.error("Cannot get topic title: Telegram client not available")
+                return None
+            
+            resolver = ChannelResolverService(client)
+            return await resolver.get_topic_title(channel_id, topic_id)
+        except Exception as e:
+            logger.error("Error getting topic title for channel %s, topic %s: %s", channel_id, topic_id, e)
+            return None
+    
     async def _get_db(self):
         """Get database instance"""
         # Ensure MongoDB is connected
@@ -166,6 +180,11 @@ class UserChannelSubscriptionService:
             channel_title = channel_info['channel_title']
             channel_link = channel_info['channel_link']
             
+            # Get topic title if topic_id is present
+            topic_title = None
+            if final_topic_id:
+                topic_title = await self._get_topic_title(channel_id, final_topic_id)
+            
             # Check if subscription already exists
             db = await self._get_db()
             query = {
@@ -191,7 +210,7 @@ class UserChannelSubscriptionService:
                 "channel_title": channel_title,
                 "channel_link": channel_link,
                 "topic_id": final_topic_id,
-                "topic_title": None,  # Will be updated when we get topic info
+                "topic_title": topic_title,
                 "is_active": True,
                 "monitor_all_topics": subscription_data.monitor_all_topics,
                 "monitored_topics": subscription_data.monitored_topics,
