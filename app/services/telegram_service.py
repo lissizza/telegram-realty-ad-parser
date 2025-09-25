@@ -1220,6 +1220,39 @@ class TelegramService:
             text = text.replace(char, f'\\{char}')
         return text
 
+    def _get_yandex_maps_link(self, address: str, district: str = None, city: str = None) -> Optional[str]:
+        """Generate Yandex Maps link for address"""
+        if not address:
+            return None
+        
+        try:
+            # Clean and prepare address for URL encoding
+            clean_address = address.strip()
+            
+            # Add district if provided and not already present
+            if district and district not in clean_address:
+                clean_address = f"{clean_address}, {district}"
+            
+            # Add city if provided and not already present
+            if city and city not in clean_address:
+                clean_address = f"{clean_address}, {city}"
+            elif not city and "Ереван" not in clean_address and "Yerevan" not in clean_address:
+                # Default to Yerevan if no city specified
+                clean_address = f"{clean_address}, Ереван"
+            
+            # URL encode the address
+            import urllib.parse
+            encoded_address = urllib.parse.quote(clean_address)
+            
+            # Generate Yandex Maps link
+            yandex_maps_url = f"https://yandex.ru/maps/?text={encoded_address}"
+            
+            return yandex_maps_url
+            
+        except Exception as e:
+            logger.error("Error generating Yandex Maps link for address '%s': %s", address, e)
+            return None
+
     async def _format_real_estate_message(
         self, real_estate_ad: Any, _original_message: Optional[Message], filter_id: Optional[str] = None
     ) -> str:
@@ -1238,8 +1271,14 @@ class TelegramService:
             message += f"*Цена:* {self._escape_markdown(f'{real_estate_ad.price:,} {currency_symbol}')}\n"
         if real_estate_ad.district:
             message += f"*Район:* {self._escape_markdown(real_estate_ad.district)}\n"
+        if real_estate_ad.city:
+            message += f"*Город:* {self._escape_markdown(real_estate_ad.city)}\n"
         if real_estate_ad.address:
             message += f"*Адрес:* {self._escape_markdown(real_estate_ad.address)}\n"
+            # Add Yandex Maps link for address
+            yandex_maps_link = self._get_yandex_maps_link(real_estate_ad.address, real_estate_ad.district, real_estate_ad.city)
+            if yandex_maps_link:
+                message += f"🗺️ [Посмотреть на карте]({yandex_maps_link})\n"
         if real_estate_ad.contacts:
             contacts_str = (
                 ", ".join(real_estate_ad.contacts)
