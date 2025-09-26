@@ -159,3 +159,26 @@ alwaysApply: true
 
 6. **Workflow**:
    - If one-time-run test scripts were created and they never will be used in future you should remove such files.
+
+## Data Protection Rules
+
+1. **NEVER use `docker-compose down -v`** unless explicitly requested by user
+
+   - This command deletes ALL data including valuable parsed content
+   - Use `docker-compose restart` or `./scripts/safe_restart.sh` for safe restarts
+   - Only use `-v` flag when user explicitly wants to start completely fresh
+
+2. **Always warn before destructive operations**
+
+   - Before any command that could delete data, explain the consequences
+   - Ask for confirmation if the operation is potentially destructive
+
+3. **Prefer safe alternatives**
+
+   - Use `docker-compose restart` instead of `docker-compose down && docker-compose up`
+   - Use `docker-compose stop && docker-compose start` for full restart without data loss
+   - Only use `docker-compose down -v` when user explicitly requests complete reset
+
+4. **Data backup recommendations**
+   - Suggest creating backups before major changes
+   - Mention data loss risks when suggesting destructive operations

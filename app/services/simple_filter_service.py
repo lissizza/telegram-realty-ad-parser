@@ -37,6 +37,11 @@ class SimpleFilterService:
                 query["user_id"] = user_id
 
             async for filter_doc in db.simple_filters.find(query):
+                # Skip filters without user_id (legacy data)
+                if "user_id" not in filter_doc:
+                    logger.warning("Skipping filter %s without user_id", filter_doc.get("_id"))
+                    continue
+                    
                 filter_doc["id"] = str(filter_doc["_id"])
                 filters.append(SimpleFilter(**filter_doc))
 

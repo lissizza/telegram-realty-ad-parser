@@ -72,13 +72,13 @@ class TelegramBot:
             [
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
                 )
             ],
             [
                 InlineKeyboardButton(
                     "📺 Управление каналами",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions"),
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"),
                 )
             ],
             [
@@ -120,14 +120,15 @@ class TelegramBot:
 
     async def settings_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /settings command"""
-        if not update.message:
+        if not update.message or not update.effective_user:
             return
 
+        user_id = update.effective_user.id
         keyboard = [
             [
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
                 )
             ]
         ]
@@ -310,6 +311,7 @@ class TelegramBot:
                     [InlineKeyboardButton("🔄 50 сообщений", callback_data="reprocess_50")],
                     [InlineKeyboardButton("🔄 Принудительно 10", callback_data="reprocess_force_10")],
                     [InlineKeyboardButton("📺 Выбрать канал", callback_data="reprocess_channel_select")],
+                    [InlineKeyboardButton("🎯 Каналы и количество", callback_data="reprocess_with_channels")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -606,18 +608,24 @@ class TelegramBot:
         elif query.data == "help":
             await self.help_command(update, context)
         elif query.data == "open_settings":
+            # Get user ID from the callback query
+            user_id = query.from_user.id if query.from_user else None
+            if not user_id:
+                await query.edit_message_text("❌ Не удалось определить ID пользователя.")
+                return
+                
             # Open Web App directly
             keyboard = [
                 [
                     InlineKeyboardButton(
                         "🏠 Управление фильтрами",
-                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters"),
+                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        "📡 Управление каналами",
-                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
+                        "📺 Управление каналами",
+                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"),
                     )
                 ],
                 [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
@@ -637,14 +645,23 @@ class TelegramBot:
             await self.refilter_command(update, context)
         elif query.data == "reprocess_channel_select":
             await self.show_channel_selection(update, context)
+        elif query.data == "reprocess_with_channels":
+            await self.show_reprocess_with_channels(update, context)
         elif query.data and query.data.startswith("reprocess_channel_"):
             await self.handle_channel_reprocess_callback(update, context, query.data)
         elif query.data and query.data.startswith("reprocess_count_"):
-            await self.handle_reprocess_count_callback(update, context, query.data)
+            # Check if it's a simple count callback (reprocess_count_5) or with channel
+            if query.data.count("_") == 2:  # reprocess_count_5
+                await self.handle_simple_reprocess_count_callback(update, context, query.data)
+            else:  # reprocess_count_5_123456_789
+                await self.handle_reprocess_count_callback(update, context, query.data)
         elif query.data and query.data.startswith("reprocess_"):
             await self.handle_reprocess_callback(update, context, query.data)
         elif query.data and query.data.startswith("refilter_"):
             await self.handle_refilter_callback(update, context, query.data)
+        elif query.data == "noop":
+            # Do nothing for separator buttons
+            pass
 
     async def handle_reprocess_callback(self, update: Update, _: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle reprocess callback queries"""
@@ -783,7 +800,7 @@ class TelegramBot:
                 await query.edit_message_text("❌ Сервис недоступен")
                 return
 
-            user_channels = await telegram_service._get_user_monitored_channels()
+            user_channels = await telegram_service._get_user_monitored_channels(user_id)
             if not user_channels:
                 await query.edit_message_text("❌ У вас нет подписок на каналы")
                 return
@@ -792,14 +809,25 @@ class TelegramBot:
             keyboard = []
             for channel_id, subscriptions in user_channels.items():
                 for sub in subscriptions:
-                    channel_title = sub.get("channel_title", f"Канал {channel_id}")
+                    # Get channel title, fallback to channel_id if no title
+                    channel_title = sub.get("channel_title") or f"Канал {channel_id}"
+                    
+                    # Truncate long channel titles (max 30 chars)
+                    if len(channel_title) > 30:
+                        channel_title = channel_title[:27] + "..."
+                    
                     topic_text = ""
                     if sub.get("topic_id"):
-                        topic_title = sub.get("topic_title", f"Топик {sub['topic_id']}")
+                        topic_title = sub.get("topic_title") or f"Топик {sub['topic_id']}"
+                        # Truncate long topic titles (max 20 chars)
+                        if len(topic_title) > 20:
+                            topic_title = topic_title[:17] + "..."
                         topic_text = f" - {topic_title}"
                     
                     button_text = f"📺 {channel_title}{topic_text}"
-                    callback_data = f"reprocess_channel_{channel_id}_{sub.get('topic_id', '')}"
+                    # Use channel_id as string, topic_id as string or empty
+                    topic_id_str = str(sub.get('topic_id', '')) if sub.get('topic_id') else ''
+                    callback_data = f"reprocess_channel_{channel_id}_{topic_id_str}"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
             # Add back button
@@ -818,6 +846,143 @@ class TelegramBot:
             logger.error("Error in show_channel_selection: %s", e)
             await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
 
+    async def show_reprocess_with_channels(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show reprocess menu with channel selection and count input"""
+        query = update.callback_query
+        if not query:
+            return
+
+        try:
+            # Get user subscriptions to show available channels
+            user_id = update.effective_user.id if update.effective_user else None
+            if not user_id:
+                await query.edit_message_text("❌ Не удалось определить пользователя")
+                return
+
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            if not telegram_service:
+                await query.edit_message_text("❌ Сервис недоступен")
+                return
+
+            user_channels = await telegram_service._get_user_monitored_channels(user_id)
+            if not user_channels:
+                await query.edit_message_text("❌ У вас нет подписок на каналы")
+                return
+
+            # Create keyboard with channels and count options
+            keyboard = []
+            
+            # Add count selection buttons
+            keyboard.append([InlineKeyboardButton("🔄 5 сообщений", callback_data="reprocess_count_5")])
+            keyboard.append([InlineKeyboardButton("🔄 10 сообщений", callback_data="reprocess_count_10")])
+            keyboard.append([InlineKeyboardButton("🔄 20 сообщений", callback_data="reprocess_count_20")])
+            keyboard.append([InlineKeyboardButton("🔄 50 сообщений", callback_data="reprocess_count_50")])
+            keyboard.append([InlineKeyboardButton("🔄 100 сообщений", callback_data="reprocess_count_100")])
+            
+            # Add separator
+            keyboard.append([InlineKeyboardButton("─" * 20, callback_data="noop")])
+            
+            # Add channel selection
+            for channel_id, subscriptions in user_channels.items():
+                for sub in subscriptions:
+                    # Get channel title, fallback to channel_id if no title
+                    channel_title = sub.get("channel_title") or f"Канал {channel_id}"
+                    
+                    
+                    # Truncate long channel titles (max 30 chars)
+                    if len(channel_title) > 30:
+                        channel_title = channel_title[:27] + "..."
+                    
+                    topic_text = ""
+                    if sub.get("topic_id"):
+                        topic_title = sub.get("topic_title") or f"Топик {sub['topic_id']}"
+                        # Truncate long topic titles (max 20 chars)
+                        if len(topic_title) > 20:
+                            topic_title = topic_title[:17] + "..."
+                        topic_text = f" - {topic_title}"
+                    
+                    button_text = f"📺 {channel_title}{topic_text}"
+                    # Use channel_id as string, topic_id as string or empty
+                    topic_id_str = str(sub.get('topic_id', '')) if sub.get('topic_id') else ''
+                    callback_data = f"reprocess_channel_{channel_id}_{topic_id_str}"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+            # Add back button
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="reprocess_menu")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "🔄 **Обработка сообщений**\n\n"
+                "**Выберите количество сообщений:**\n"
+                "• 5, 10, 20, 50, 100 сообщений\n\n"
+                "**Или выберите конкретный канал:**\n"
+                "• Обработать все сообщения из выбранного канала\n\n"
+                "**Команды:**\n"
+                "• `/reprocess 10` - обработать 10 последних сообщений\n"
+                "• `/reprocess 10 --force` - принудительно переобработать",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error("Error in show_reprocess_with_channels: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
+
+    async def handle_simple_reprocess_count_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle simple reprocess count callback (reprocess_count_5)"""
+        query = update.callback_query
+        if not query:
+            return
+
+        try:
+            # Parse callback data: reprocess_count_{count}
+            parts = callback_data.split("_")
+            if len(parts) != 3:
+                await query.answer("❌ Неверный формат данных")
+                return
+
+            count = int(parts[2])
+
+            # Show processing message
+            await query.edit_message_text(
+                f"🔄 Обрабатываю {count} последних сообщений...\n"
+                "Это может занять некоторое время."
+            )
+
+            # Get telegram service
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            if not telegram_service:
+                await query.edit_message_text("❌ Сервис недоступен")
+                return
+
+            # Get user ID
+            user_id = update.effective_user.id if update.effective_user else None
+
+            # Call reprocess
+            result = await telegram_service.reprocess_recent_messages(count, False, user_id)
+
+            # Update message with results
+            await query.edit_message_text(
+                f"✅ **Обработка завершена!**\n\n"
+                f"📊 **Результаты:**\n"
+                f"• 🔍 Обработано объявлений: {result['total_processed']}\n"
+                f"• ⏭️ Пропущено (уже обработаны): {result['skipped']}\n"
+                f"• 🏠 Найдено объявлений о недвижимости: {result['real_estate_ads']}\n"
+                f"• 🚫 Отфильтровано спама: {result['spam_filtered']}\n"
+                f"• ❌ Не недвижимость: {result['not_real_estate']}\n"
+                f"• 🎯 Соответствует фильтрам: {result['matched_filters']}\n"
+                f"• ✅ Переслано пользователю: {result['forwarded']}\n"
+                f"• ⚠️ Ошибок: {result['errors']}",
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error("Error in handle_simple_reprocess_count_callback: %s", e)
+            await query.edit_message_text(f"❌ Произошла ошибка: {str(e)}")
+
     async def handle_channel_reprocess_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle channel-specific reprocess callback"""
         query = update.callback_query
@@ -831,8 +996,8 @@ class TelegramBot:
                 await query.answer("❌ Неверный формат данных")
                 return
 
-            channel_id = int(parts[2])
-            topic_id = int(parts[3]) if parts[3] else None
+            channel_id = parts[2]
+            topic_id = int(parts[3]) if parts[3] and parts[3].isdigit() else None
 
             # Show count selection for this channel
             keyboard = [
@@ -870,8 +1035,8 @@ class TelegramBot:
                 return
 
             count = int(parts[2])
-            channel_id = int(parts[3])
-            topic_id = int(parts[4]) if parts[4] else None
+            channel_id = parts[3]
+            topic_id = int(parts[4]) if parts[4] and parts[4].isdigit() else None
 
             # Show processing message
             topic_text = f" (топик {topic_id})" if topic_id else ""

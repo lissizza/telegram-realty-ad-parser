@@ -126,24 +126,56 @@ async def create_simple_filter(
 ):
     """Create a new simple filter"""
     try:
+        # Additional validation
+        if not filter_data.name or not filter_data.name.strip():
+            raise HTTPException(status_code=400, detail="Filter name is required")
+        
+        if filter_data.user_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid user ID")
+        
+        # Validate room range
+        if filter_data.min_rooms and filter_data.max_rooms and filter_data.min_rooms > filter_data.max_rooms:
+            raise HTTPException(status_code=400, detail="min_rooms cannot be greater than max_rooms")
+        
+        # Validate area range
+        if filter_data.min_area and filter_data.max_area and filter_data.min_area > filter_data.max_area:
+            raise HTTPException(status_code=400, detail="min_area cannot be greater than max_area")
+        
+        # Sanitize string inputs
+        filter_data.name = filter_data.name.strip()
+        if filter_data.description:
+            filter_data.description = filter_data.description.strip()
+        
         filter_id = await service.create_filter(filter_data.dict())
         return {"id": filter_id, "message": "Filter created successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.patch("/{filter_id}", response_model=dict)
 async def update_simple_filter(
-    filter_id: str, filter_data: SimpleFilterUpdate, service: SimpleFilterService = Depends(get_simple_filter_service)
+    filter_id: str, 
+    filter_data: SimpleFilterUpdate, 
+    user_id: int = Query(..., description="User ID for ownership verification"),
+    service: SimpleFilterService = Depends(get_simple_filter_service)
 ):
     """Update an existing simple filter"""
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info("Starting PATCH update for filter %s", filter_id)
+        logger.info("Starting PATCH update for filter %s by user %s", filter_id, user_id)
 
         # Get current filter state
         current_filter = await service.get_filter_by_id(filter_id)
+        if not current_filter:
+            raise HTTPException(status_code=404, detail="Filter not found")
+        
+        # Check ownership
+        if current_filter.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You can only update your own filters")
+        
         logger.info("Current filter state: %s", current_filter)
 
         # Include only non-None values to avoid overwriting required fields
@@ -168,26 +200,54 @@ async def update_simple_filter(
 
 
 @router.delete("/{filter_id}", response_model=dict)
-async def delete_simple_filter(filter_id: str, service: SimpleFilterService = Depends(get_simple_filter_service)):
+async def delete_simple_filter(
+    filter_id: str, 
+    user_id: int = Query(..., description="User ID for ownership verification"),
+    service: SimpleFilterService = Depends(get_simple_filter_service)
+):
     """Delete a simple filter"""
     try:
+        # Check ownership before deletion
+        current_filter = await service.get_filter_by_id(filter_id)
+        if not current_filter:
+            raise HTTPException(status_code=404, detail="Filter not found")
+        
+        if current_filter.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own filters")
+        
         success = await service.delete_filter(filter_id)
         if success:
             return {"message": "Filter deleted successfully"}
         else:
             raise HTTPException(status_code=404, detail="Filter not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/{filter_id}/toggle", response_model=dict)
-async def toggle_simple_filter(filter_id: str, service: SimpleFilterService = Depends(get_simple_filter_service)):
+async def toggle_simple_filter(
+    filter_id: str, 
+    user_id: int = Query(..., description="User ID for ownership verification"),
+    service: SimpleFilterService = Depends(get_simple_filter_service)
+):
     """Toggle filter active status"""
     try:
+        # Check ownership before toggle
+        current_filter = await service.get_filter_by_id(filter_id)
+        if not current_filter:
+            raise HTTPException(status_code=404, detail="Filter not found")
+        
+        if current_filter.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You can only toggle your own filters")
+        
         success = await service.toggle_filter_status(filter_id)
         if success:
             return {"message": "Filter status toggled successfully"}
         else:
             raise HTTPException(status_code=404, detail="Filter not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

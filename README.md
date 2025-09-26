@@ -48,18 +48,21 @@ The bot parses the following information from real estate advertisements:
 ### Setup
 
 1. **Clone the repository**:
+
    ```bash
    git clone <repository-url>
    cd telegram-real-estate-bot
    ```
 
 2. **Configure environment**:
+
    ```bash
    cp env.example .env
    # Edit .env with your Telegram API credentials
    ```
 
 3. **Start the application**:
+
    ```bash
    docker-compose up -d
    ```
@@ -71,23 +74,24 @@ The bot parses the following information from real estate advertisements:
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `TELEGRAM_API_ID` | Your Telegram API ID | Yes |
-| `TELEGRAM_API_HASH` | Your Telegram API Hash | Yes |
-| `TELEGRAM_PHONE` | Your phone number | Yes |
-| `TELEGRAM_BOT_TOKEN` | Bot token (optional) | No |
-| `SECRET_KEY` | Secret key for JWT tokens | Yes |
-| `MONGODB_URL` | MongoDB connection string | Yes |
-| `REDIS_URL` | Redis connection string | Yes |
-| `DEFAULT_MONITORED_CHANNEL` | Channel ID to monitor for real estate ads | Yes |
-| `FORWARDING_CHANNEL` | Channel for forwarding filtered ads | Yes |
-| `TELEGRAM_MONITORED_CHANNELS` | Additional channels to monitor (optional) | No |
-| `LLM_API_KEY` | API key for LLM service (optional) | No |
+| Variable                      | Description                               | Required |
+| ----------------------------- | ----------------------------------------- | -------- |
+| `TELEGRAM_API_ID`             | Your Telegram API ID                      | Yes      |
+| `TELEGRAM_API_HASH`           | Your Telegram API Hash                    | Yes      |
+| `TELEGRAM_PHONE`              | Your phone number                         | Yes      |
+| `TELEGRAM_BOT_TOKEN`          | Bot token (optional)                      | No       |
+| `SECRET_KEY`                  | Secret key for JWT tokens                 | Yes      |
+| `MONGODB_URL`                 | MongoDB connection string                 | Yes      |
+| `REDIS_URL`                   | Redis connection string                   | Yes      |
+| `DEFAULT_MONITORED_CHANNEL`   | Channel ID to monitor for real estate ads | Yes      |
+| `FORWARDING_CHANNEL`          | Channel for forwarding filtered ads       | Yes      |
+| `TELEGRAM_MONITORED_CHANNELS` | Additional channels to monitor (optional) | No       |
+| `LLM_API_KEY`                 | API key for LLM service (optional)        | No       |
 
 ### Environment Examples
 
 **Development (.env):**
+
 ```env
 # Secrets
 TELEGRAM_API_ID=12345678
@@ -111,6 +115,7 @@ LLM_MODEL=gpt-3.5-turbo
 ```
 
 **Production (.env):**
+
 ```env
 # Secrets
 TELEGRAM_API_ID=12345678
@@ -136,6 +141,7 @@ LLM_MODEL=gpt-3.5-turbo
 ## API Endpoints
 
 ### Filters
+
 - `GET /api/v1/filters/` - List all filters
 - `POST /api/v1/filters/` - Create new filter
 - `GET /api/v1/filters/{id}` - Get specific filter
@@ -143,17 +149,20 @@ LLM_MODEL=gpt-3.5-turbo
 - `DELETE /api/v1/filters/{id}` - Delete filter
 
 ### Posts
+
 - `GET /api/v1/posts/` - List posts with pagination
 - `GET /api/v1/posts/{id}` - Get specific post
 - `DELETE /api/v1/posts/{id}` - Delete post
 
 ### Channels
+
 - `GET /api/v1/channels/` - List monitored channels
 - `POST /api/v1/channels/` - Add new channel
 - `PUT /api/v1/channels/{id}` - Update channel
 - `DELETE /api/v1/channels/{id}` - Remove channel
 
 ### Telegram Bot
+
 - `POST /api/v1/telegram/start-monitoring` - Start monitoring
 - `POST /api/v1/telegram/stop-monitoring` - Stop monitoring
 - `GET /api/v1/telegram/status` - Get bot status
@@ -176,11 +185,13 @@ Filters support the following criteria:
 ### Local Development
 
 1. **Install Poetry**:
+
    ```bash
    curl -sSL https://install.python-poetry.org | python3 -
    ```
 
 2. **Install dependencies**:
+
    ```bash
    poetry install
    ```
@@ -223,4 +234,4 @@ poetry run isort .
 
 ## License
 
-MIT License 
+MIT License

@@ -142,6 +142,9 @@ class TestYandexMapsIntegration:
         assert "Посмотреть на карте" in message
         assert "yandex.ru/maps" in message
         assert "text=" in message  # URL parameter should be present
+        # Check that address is clickable
+        assert "ул. Абовяна, 15" in message
+        assert "yandex.ru/maps" in message
 
     @pytest.mark.asyncio
     async def test_format_message_without_city_defaults_to_yerevan(self, telegram_service, sample_ad_without_city):

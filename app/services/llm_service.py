@@ -99,6 +99,10 @@ class LLMService:
                 llm_cost=cost_info.get("cost_usd"),
                 **parsed_data,
             )
+            
+            # Copy rooms_count to rooms for API compatibility
+            if ad.rooms_count is not None:
+                ad.rooms = ad.rooms_count
 
             # Save to database (all LLM results are saved)
             await self._save_real_estate_ad(ad)
@@ -234,6 +238,37 @@ Output:
   "additional_notes": "Only floor information provided (3/8), no room count mentioned"
 }}
 
+Example 3 (Yerevan address parsing):
+Input: "Адрес: Маштоц, Кентрон, Ереван"
+Output:
+{{
+  "is_real_estate": true,
+  "parsing_confidence": 0.9,
+  "property_type": "apartment",
+  "rental_type": "long_term",
+  "rooms_count": null,
+  "area_sqm": null,
+  "price": null,
+  "currency": null,
+  "district": "Кентрон",
+  "address": "улица Маштоца",
+  "contacts": null,
+  "has_balcony": null,
+  "has_air_conditioning": null,
+  "has_internet": null,
+  "has_furniture": null,
+  "has_parking": null,
+  "has_garden": null,
+  "has_pool": null,
+  "has_elevator": null,
+  "pets_allowed": null,
+  "utilities_included": null,
+  "floor": null,
+  "total_floors": null,
+  "city": "Ереван",
+  "additional_notes": null
+}}
+
 EXTRACTION RULES:
 - If information is not available, use null
 - For boolean fields, use true/false
@@ -241,9 +276,13 @@ EXTRACTION RULES:
 - Extract phone numbers with country code if available, otherwise add appropriate country code based
  on city/address context
 - Extract Telegram usernames as @username
-- For districts, use standard Yerevan district names
+- For districts, use standard Yerevan district names (Кентрон, Арабкир, Аван, Нор-Норк, Эребуни, Шенгавит, Давидашен, Ачапняк, Норк-Мараш, Канакер-Зейтун, Малатия-Себастия, Норк-Мараш)
 - For city, extract main city name (Ереван, Москва, Санкт-Петербург, etc.)
 - For address, extract street names, building numbers, metro stations
+- IMPORTANT: For Yerevan addresses, parse format "улица, район, город" correctly:
+  * "Маштоц, Кентрон, Ереван" = address: "улица Маштоца", district: "Кентрон", city: "Ереван"
+  * "Абовяна 15, Кентрон, Ереван" = address: "улица Абовяна 15", district: "Кентрон", city: "Ереван"
+  * "Туманяна 25, Арабкир, Ереван" = address: "улица Туманяна 25", district: "Арабкир", city: "Ереван"
 
 NOTES:
 - Mark is_real_estate false for spam, jobs, services
@@ -256,6 +295,11 @@ NOTES:
  in additional_notes
 - If room count is unclear or could be interpreted differently, explain in additional_notes
 - For any parsing decisions that might be controversial, add explanation to additional_notes
+- ADDRESS PARSING: For Yerevan addresses, always parse "улица, район, город" format correctly:
+  * First part = street name (add "улица" prefix if not present)
+  * Second part = district (use standard district names)
+  * Third part = city (usually "Ереван")
+  * Example: "Маштоц, Кентрон, Ереван" → address: "улица Маштоца", district: "Кентрон", city: "Ереван"
 
 Analyze this real estate text and return JSON:
 

@@ -38,7 +38,11 @@ async def get_real_estate_ads(
     cursor = db.real_estate_ads.find(query).skip(skip).limit(limit).sort("created_at", -1)
     async for ad_doc in cursor:
         ad_doc["id"] = str(ad_doc["_id"])
-        ads.append(RealEstateAd(**ad_doc))
+        ad = RealEstateAd(**ad_doc)
+        # Copy rooms_count to rooms for API compatibility
+        if ad.rooms_count is not None:
+            ad.rooms = ad.rooms_count
+        ads.append(ad)
     return ads
 
 
@@ -50,7 +54,11 @@ async def get_real_estate_ad(ad_id: str):
     if not ad_doc:
         raise HTTPException(status_code=404, detail="Real estate ad not found")
     ad_doc["id"] = str(ad_doc["_id"])
-    return RealEstateAd(**ad_doc)
+    ad = RealEstateAd(**ad_doc)
+    # Copy rooms_count to rooms for API compatibility
+    if ad.rooms_count is not None:
+        ad.rooms = ad.rooms_count
+    return ad
 
 
 @router.delete("/{ad_id}")

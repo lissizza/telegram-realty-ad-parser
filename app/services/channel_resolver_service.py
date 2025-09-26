@@ -87,14 +87,25 @@ class ChannelResolverService:
             path = parsed.path.strip("/")
             
             if path.startswith("c/"):
-                # https://t.me/c/channel_id/message_id
+                # https://t.me/c/channel_id/message_id or https://t.me/c/username/message_id
                 parts = path.split("/")
                 if len(parts) >= 2:
-                    channel_id = int(parts[1])
-                    # Convert to negative ID for supergroups
-                    if channel_id > 0:
-                        channel_id = -(channel_id + 1000000000000)
-                    return await self._get_channel_info_by_id(channel_id)
+                    try:
+                        # Try to parse as numeric channel ID
+                        channel_id = int(parts[1])
+                        # Convert to negative ID for supergroups
+                        if channel_id > 0:
+                            channel_id = -(channel_id + 1000000000000)
+                        return await self._get_channel_info_by_id(channel_id)
+                    except ValueError:
+                        # If not numeric, treat as username
+                        username = parts[1]
+                        topic_id = int(parts[2]) if len(parts) > 2 else None
+                        
+                        channel_info = await self._get_channel_info_by_username(username)
+                        if channel_info and topic_id:
+                            channel_info['topic_id'] = topic_id
+                        return channel_info
             else:
                 # https://t.me/channel_username or https://t.me/channel_username/topic_id
                 parts = path.split("/")

@@ -291,11 +291,53 @@
             console.log('Telegram WebApp not available');
         }
 
-        // If no user ID from Telegram, try to get from URL params or use default
+        // If no user ID from Telegram, try to get from URL params or hash
         if (!currentUserId) {
             const urlParams = new URLSearchParams(window.location.search);
-            currentUserId = urlParams.get('user_id') || '223720761'; // Default fallback
-            console.log('User ID from URL or default:', currentUserId);
+            const userIdFromUrl = urlParams.get('user_id');
+            console.log('User ID from URL (raw):', userIdFromUrl);
+            
+            if (userIdFromUrl) {
+                currentUserId = parseInt(userIdFromUrl);
+                console.log('User ID from URL (parsed):', currentUserId);
+            } else {
+                console.log('No user_id in URL params, trying to parse from hash...');
+                
+                // Try to parse user data from URL hash (tgWebAppData)
+                const hash = window.location.hash;
+                console.log('URL hash:', hash);
+                
+                if (hash.includes('tgWebAppData=')) {
+                    try {
+                        const tgWebAppData = hash.split('tgWebAppData=')[1].split('&')[0];
+                        const decodedData = decodeURIComponent(tgWebAppData);
+                        console.log('Decoded tgWebAppData:', decodedData);
+                        
+                        // Parse user data from the decoded string
+                        const userMatch = decodedData.match(/user%3D([^&]+)/);
+                        if (userMatch) {
+                            const userDataStr = decodeURIComponent(userMatch[1]);
+                            console.log('User data string:', userDataStr);
+                            
+                            const userData = JSON.parse(userDataStr);
+                            console.log('Parsed user data:', userData);
+                            
+                            if (userData.id) {
+                                currentUserId = userData.id;
+                                console.log('User ID from hash:', currentUserId);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error parsing tgWebAppData:', e);
+                    }
+                }
+                
+                // Fallback to default if still no user ID
+                if (!currentUserId) {
+                    currentUserId = '223720761'; // Default fallback
+                    console.log('Using default user ID:', currentUserId);
+                }
+            }
         }
         
         console.log('Final currentUserId:', currentUserId);

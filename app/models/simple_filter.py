@@ -55,21 +55,17 @@ class SimpleFilter(BaseModel):
         """Check if ad matches this filter"""
         # Property type match
         if self.property_types and ad.property_type not in self.property_types:
-            print(f"DEBUG: Property type mismatch - ad.property_type={ad.property_type}, filter.property_types={self.property_types}")
             return False
         
         # Rental type match
         if self.rental_types and ad.rental_type not in self.rental_types:
-            print(f"DEBUG: Rental type mismatch - ad.rental_type={ad.rental_type}, filter.rental_types={self.rental_types}")
             return False
         
         # Room count match
         if ad.rooms_count is not None:
             if self.min_rooms is not None and ad.rooms_count < self.min_rooms:
-                print(f"DEBUG: Room count too low - ad.rooms_count={ad.rooms_count}, filter.min_rooms={self.min_rooms}")
                 return False
             if self.max_rooms is not None and ad.rooms_count > self.max_rooms:
-                print(f"DEBUG: Room count too high - ad.rooms_count={ad.rooms_count}, filter.max_rooms={self.max_rooms}")
                 return False
         
         # Area match
@@ -95,36 +91,23 @@ class SimpleFilter(BaseModel):
                 return False
         
         # Feature matches
-        feature_checks = [
-            ('has_balcony', self.has_balcony),
-            ('has_air_conditioning', self.has_air_conditioning),
-            ('has_internet', self.has_internet),
-            ('has_furniture', self.has_furniture),
-            ('has_parking', self.has_parking),
-            ('has_garden', self.has_garden),
-            ('has_pool', self.has_pool),
-            ('has_elevator', self.has_elevator),
-            ('pets_allowed', self.pets_allowed),
-            ('utilities_included', self.utilities_included)
-        ]
-        
-        for feature, required_value in feature_checks:
-            if required_value is not None:
-                ad_value = getattr(ad, feature, None)
-                # If filter specifies True, ad must have this feature (True)
-                # If filter specifies False, ad must NOT have this feature (False or None)
-                if required_value is True:
-                    # Ad must have this feature (True)
-                    if ad_value is not True:
-                        print(f"DEBUG: Feature {feature} should be True but ad has {ad_value}")
-                        return False
-                elif required_value is False:
-                    # Ad should not have this feature (False or None is OK)
-                    if ad_value is True:
-                        print(f"DEBUG: Feature {feature} should be False/None but ad has True")
-                        return False
-        
-        return True
+        filters = {
+            'has_balcony': self.has_balcony,
+            'has_air_conditioning': self.has_air_conditioning,
+            'has_internet': self.has_internet,
+            'has_furniture': self.has_furniture,
+            'has_parking': self.has_parking,
+            'has_garden': self.has_garden,
+            'has_pool': self.has_pool,
+            'has_elevator': self.has_elevator,
+            'pets_allowed': self.pets_allowed,
+            'utilities_included': self.utilities_included,
+        }
+
+        return all(
+            required is None or getattr(ad, feature, None) == required
+            for feature, required in filters.items()
+        )
     
     def matches_with_price_filters(self, ad, price_filters: List[PriceFilter]) -> bool:
         """Check if ad matches this filter including price filters"""
@@ -144,8 +127,8 @@ class SimpleFilter(BaseModel):
             # If we have price filters but none matched, return False
             return False
         
-        # If ad has no price info, it doesn't match price filters
-        return False
+        # If ad has no price info, it matches (no price restriction)
+        return True
 
 
 

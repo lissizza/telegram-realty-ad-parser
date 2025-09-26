@@ -31,6 +31,7 @@ class TelegramService:
         self.is_monitoring = False
         # Cache for topic top_message IDs to reduce API calls
         self.topic_cache: Dict[tuple[int, int], int] = {}  # (channel_id, topic_id) -> top_message_id
+        self._initialized = False
 
     def set_notification_service(self, bot: Any) -> None:
         """Set the notification service with bot instance"""
@@ -128,12 +129,24 @@ class TelegramService:
             return
 
         try:
-            # Initialize Telegram client
-            self.client = TelegramClient(
-                settings.TELEGRAM_SESSION_NAME, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH
-            )
-
-            await self.client.start(phone=settings.TELEGRAM_PHONE)
+            # Initialize Telegram client only if not already exists and not initialized
+            if not self.client or not self._initialized:
+                if self.client:
+                    # Clean up existing client if it exists but not properly initialized
+                    try:
+                        await self.client.disconnect()
+                    except Exception:
+                        pass  # Ignore errors during cleanup
+                
+                self.client = TelegramClient(
+                    settings.TELEGRAM_SESSION_NAME, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH
+                )
+                await self.client.start(phone=settings.TELEGRAM_PHONE)
+                self._initialized = True
+                logger.info("Telegram client initialized successfully")
+            elif not self.client.is_connected():
+                await self.client.start(phone=settings.TELEGRAM_PHONE)
+                logger.info("Telegram client reconnected")
 
             # Initialize topic cache for better performance
             await self._initialize_topic_cache()
@@ -261,7 +274,9 @@ class TelegramService:
         try:
             if self.client:
                 await self.client.disconnect()
+                self.client = None
             self.is_monitoring = False
+            self._initialized = False
             logger.info("Stopped monitoring Telegram channels")
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error stopping monitoring: %s", e)
@@ -374,7 +389,7 @@ class TelegramService:
             logger.error("Error getting monitored channels: %s", e)
             return []
 
-    async def _get_user_monitored_channels(self) -> Dict[int, List[Dict]]:
+    async def _get_user_monitored_channels(self, user_id: Optional[int] = None) -> Dict[int, List[Dict]]:
         """Get monitored channels from user subscriptions"""
         try:
             from app.services.user_channel_subscription_service import (
@@ -382,8 +397,12 @@ class TelegramService:
             )
             
             subscription_service = UserChannelSubscriptionService()
-            subscriptions = await subscription_service.get_all_active_subscriptions()
-            logger.info("Found %d active subscriptions", len(subscriptions))
+            if user_id:
+                subscriptions = await subscription_service.get_user_subscriptions(user_id, active_only=True)
+                logger.info("Found %d active subscriptions for user %s", len(subscriptions), user_id)
+            else:
+                subscriptions = await subscription_service.get_all_active_subscriptions()
+                logger.info("Found %d active subscriptions", len(subscriptions))
             
             # Group subscriptions by channel
             channels = {}
@@ -422,9 +441,12 @@ class TelegramService:
                 channels[channel_id_int].append({
                     "user_id": subscription.user_id,
                     "topic_id": subscription.topic_id,
+                    "topic_title": subscription.topic_title,
                     "monitor_all_topics": subscription.monitor_all_topics,
                     "monitored_topics": subscription.monitored_topics,
-                    "subscription_id": subscription.id
+                    "subscription_id": subscription.id,
+                    "channel_title": subscription.channel_title,
+                    "channel_username": subscription.channel_username
                 })
             
             logger.info("User monitored channels: %s", list(channels.keys()))
@@ -493,6 +515,18 @@ class TelegramService:
             "технические особенности",
             "работать некорректно",
             "cas.chat",
+            # Spam and moderation messages
+            "заблокировали",
+            "lolsbot",
+            "antispam",
+            "антиспам",
+            "спам",
+            "botcatcher",
+            "бесплатный антиспам",
+            "usdt за наличные",
+            "курс честный",
+            "безопасная встреча",
+            "билеты",
         ]
 
         return any(tech_indicator in message_text.lower() for tech_indicator in tech_indicators)
@@ -837,7 +871,7 @@ class TelegramService:
             except Exception as update_error:  # pylint: disable=broad-except
                 logger.error("Error updating post status to error: %s", update_error)
 
-    async def _forward_post(self, message: Optional[Message], real_estate_ad: Any, filter_id: str) -> None:
+    async def _forward_post(self, message: Optional[Message], real_estate_ad: Any, filter_id: str, filter_name: Optional[str] = None) -> None:
         """Forward post to user via bot"""
         try:
             # Get user ID from settings (your Telegram user ID)
@@ -847,7 +881,7 @@ class TelegramService:
                 return
 
             # Create formatted message with filter information
-            formatted_message = await self._format_real_estate_message(real_estate_ad, message, filter_id)
+            formatted_message = await self._format_real_estate_message(real_estate_ad, message, filter_id, filter_name)
 
             # Send to user via notification service
             # Create inline keyboard with settings button
@@ -1254,7 +1288,7 @@ class TelegramService:
             return None
 
     async def _format_real_estate_message(
-        self, real_estate_ad: Any, _original_message: Optional[Message], filter_id: Optional[str] = None
+        self, real_estate_ad: Any, _original_message: Optional[Message], filter_id: Optional[str] = None, filter_name: Optional[str] = None
     ) -> str:
         """Format real estate ad for forwarding"""
         message = "🏠 *Найдено подходящее объявление\\!*\n\n"
@@ -1274,11 +1308,15 @@ class TelegramService:
         if real_estate_ad.city:
             message += f"*Город:* {self._escape_markdown(real_estate_ad.city)}\n"
         if real_estate_ad.address:
-            message += f"*Адрес:* {self._escape_markdown(real_estate_ad.address)}\n"
             # Add Yandex Maps link for address
             yandex_maps_link = self._get_yandex_maps_link(real_estate_ad.address, real_estate_ad.district, real_estate_ad.city)
             if yandex_maps_link:
+                # Make address clickable with Yandex Maps link
+                message += f"*Адрес:* [{self._escape_markdown(real_estate_ad.address)}]({yandex_maps_link})\n"
                 message += f"🗺️ [Посмотреть на карте]({yandex_maps_link})\n"
+            else:
+                # Fallback to plain text if no map link
+                message += f"*Адрес:* {self._escape_markdown(real_estate_ad.address)}\n"
         if real_estate_ad.contacts:
             contacts_str = (
                 ", ".join(real_estate_ad.contacts)
@@ -1294,7 +1332,9 @@ class TelegramService:
             message += f"\n*📢 Канал:* {channel_title}"
             if channel_info.get('username'):
                 username = channel_info['username'].lstrip('@')
-                message += f" \\(@{username}\\)"
+                # Escape underscores in username for MarkdownV2
+                escaped_username = username.replace('_', '\\_')
+                message += f" \\(@{escaped_username}\\)"
             
             # Add topic information if available
             if real_estate_ad.original_topic_id:
@@ -1306,9 +1346,12 @@ class TelegramService:
 
         # Add filter matching information
         # Note: Filter matching info is now handled via UserFilterMatch model
-            if filter_id:
-                filter_name = await self._get_filter_name(str(filter_id))
-                message += f"*🎯 Активный фильтр:* {self._escape_markdown(filter_name)}\n"
+        if filter_name:
+            message += f"\n*🎯 Активный фильтр:* {self._escape_markdown(filter_name)}\n"
+        elif filter_id and filter_id != "unknown":
+            # Fallback to getting filter name by ID
+            filter_name = await self._get_filter_name(str(filter_id))
+            message += f"\n*🎯 Активный фильтр:* {self._escape_markdown(filter_name)}\n"
 
         message += f"\n*Уверенность:* {self._escape_markdown(f'{real_estate_ad.parsing_confidence:.2f}')}\n"
 
@@ -1536,13 +1579,24 @@ class TelegramService:
                         for filter_doc in user_filter_docs:
                             filter_obj = SimpleFilter(**filter_doc)
                             
+                            # Get price filters for this filter
+                            price_filters = []
+                            if filter_obj.id:
+                                price_filters = await filter_service.price_filter_service.get_price_filters_by_filter_id(str(filter_obj.id))
+                            
                             # Debug logging
                             logger.info("Checking ad %s (rooms=%s) against filter %s (min_rooms=%s, max_rooms=%s)", 
                                        ad.original_post_id, ad.rooms_count, filter_obj.name, 
                                        filter_obj.min_rooms, filter_obj.max_rooms)
                             
-                            if filter_obj.matches(ad):
-                                filter_id = str(filter_obj.id) if filter_obj.id else "unknown"
+                            # Use the new method that includes price filters
+                            if price_filters:
+                                matches = filter_obj.matches_with_price_filters(ad, price_filters)
+                            else:
+                                matches = filter_obj.matches(ad)
+                            
+                            if matches:
+                                filter_id = str(filter_doc["_id"]) if filter_doc.get("_id") else "unknown"
                                 matching_filters.append(filter_id)
                                 logger.info("Ad %s matched filter %s for user %s", 
                                            ad.original_post_id, filter_obj.name, user_id)
@@ -1555,6 +1609,18 @@ class TelegramService:
                             # Note: matched_filters is now handled via UserFilterMatch model
                             
                             for filter_id in matching_filters:
+                                # Find the filter name for this filter_id
+                                filter_name = None
+                                for filter_doc in user_filter_docs:
+                                    if str(filter_doc["_id"]) == filter_id:
+                                        filter_name = filter_doc.get("name", "Unknown Filter")
+                                        break
+                                
+                                # Skip if filter_id is "unknown"
+                                if filter_id == "unknown":
+                                    logger.warning("Skipping filter with unknown ID for user %s", user_id)
+                                    continue
+                                
                                 # Create match record
                                 match_id = await match_service.create_match(
                                     user_id=user_id,
@@ -1573,10 +1639,10 @@ class TelegramService:
                                     
                                     if not existing_forward:
                                         try:
-                                            # Forward post - _original_message is not used in _format_real_estate_message
-                                            await self._forward_post(None, ad, filter_id)
+                                            # Forward post with filter name
+                                            await self._forward_post(None, ad, filter_id, filter_name)
                                             forwarded += 1
-                                            logger.info("Ad %s forwarded to user %s", ad.original_post_id, user_id)
+                                            logger.info("Ad %s forwarded to user %s with filter %s", ad.original_post_id, user_id, filter_name)
                                             
                                             # Mark match as forwarded
                                             await match_service.mark_as_forwarded(match_id)

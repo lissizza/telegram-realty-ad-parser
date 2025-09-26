@@ -53,15 +53,56 @@
         .form-group input,
         .form-group select {
             width: 100%;
-            padding: 8px 12px;
+            padding: 5px 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
+            /* Windows compatibility fixes */
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-color: white;
+            outline: none;
+            /* Ensure proper focus behavior */
+            transition: border-color 0.2s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: #2481cc;
+            box-shadow: 0 0 0 2px rgba(36, 129, 204, 0.2);
         }
 
         .form-group input[type="checkbox"] {
             width: auto;
             margin-right: 8px;
+            /* Mobile compatibility */
+            min-width: 20px;
+            min-height: 20px;
+            cursor: pointer;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            border: 2px solid #ddd;
+            border-radius: 3px;
+            background-color: white;
+            position: relative;
+        }
+        
+        .form-group input[type="checkbox"]:checked {
+            background-color: #2481cc;
+            border-color: #2481cc;
+        }
+        
+        .form-group input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
         }
 
         .checkbox-group {
@@ -71,6 +112,20 @@
         }
 
         .checkbox-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        .checkbox-item label {
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            padding: 5px;
+            margin: 0;
+            /* Make label more touch-friendly */
+            min-height: 30px;
             display: flex;
             align-items: center;
         }
@@ -310,7 +365,7 @@
 
         .price-filter-row .form-group input,
         .price-filter-row .form-group select {
-            padding: 6px 8px;
+            padding: 4px 6px;
             font-size: 13px;
         }
 
@@ -382,6 +437,39 @@
         .hidden {
             display: none;
         }
+        
+        /* Mobile-specific styles */
+        @media (max-width: 768px) {
+            .checkbox-item {
+                min-height: 40px;
+                padding: 5px 0;
+            }
+            
+            .form-group input[type="checkbox"] {
+                min-width: 24px;
+                min-height: 24px;
+                margin-right: 10px;
+            }
+            
+            .checkbox-item label {
+                font-size: 16px;
+                min-height: 40px;
+                padding: 8px;
+            }
+            
+            .btn {
+                min-height: 44px;
+                font-size: 16px;
+                padding: 12px 16px;
+            }
+            
+            .form-group input,
+            .form-group select {
+                min-height: 32px;
+                font-size: 16px;
+                padding: 8px;
+            }
+        }
     </style>
 </head>
 
@@ -401,11 +489,11 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="name">Filter Name *</label>
-                        <input type="text" id="name" name="name" required>
+                        <input type="text" id="name" name="name" required autocomplete="off" spellcheck="false">
                     </div>
                     <div class="form-group">
                         <label for="description">Description</label>
-                        <input type="text" id="description" name="description">
+                        <input type="text" id="description" name="description" autocomplete="off" spellcheck="false">
                     </div>
                 </div>
 
@@ -449,22 +537,22 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="min_rooms">Min Rooms</label>
-                        <input type="number" id="min_rooms" name="min_rooms" min="1" max="10">
+                        <input type="number" id="min_rooms" name="min_rooms" min="1" max="10" autocomplete="off" inputmode="numeric">
                     </div>
                     <div class="form-group">
                         <label for="max_rooms">Max Rooms</label>
-                        <input type="number" id="max_rooms" name="max_rooms" min="1" max="10">
+                        <input type="number" id="max_rooms" name="max_rooms" min="1" max="10" autocomplete="off" inputmode="numeric">
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label for="min_area">Min Area (sqm)</label>
-                        <input type="number" id="min_area" name="min_area" min="1" step="0.1">
+                        <input type="number" id="min_area" name="min_area" min="1" step="0.1" autocomplete="off" inputmode="decimal">
                     </div>
                     <div class="form-group">
                         <label for="max_area">Max Area (sqm)</label>
-                        <input type="number" id="max_area" name="max_area" min="1" step="0.1">
+                        <input type="number" id="max_area" name="max_area" min="1" step="0.1" autocomplete="off" inputmode="decimal">
                     </div>
                 </div>
 
@@ -472,7 +560,7 @@
                 <div class="form-section">
                     <div class="form-section-header">
                         <label>Price Filters</label>
-                        <button type="button" class="btn btn-sm btn-success" onclick="addPriceFilterRow()">+ Add Price Filter</button>
+                        <button type="button" class="btn btn-sm btn-success" onclick="addPriceFilterRow()" title="Add Price Filter">+</button>
                     </div>
                     <div id="priceFiltersContainer">
                         <!-- Price filter rows will be added here -->
@@ -482,7 +570,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="districts">Districts (comma-separated)</label>
-                        <input type="text" id="districts" name="districts" placeholder="Центр, Арабкир, Малатия">
+                        <input type="text" id="districts" name="districts" placeholder="Центр, Арабкир, Малатия" autocomplete="off" spellcheck="false">
                     </div>
                 </div>
 
@@ -559,22 +647,251 @@
             console.log('Telegram WebApp not available');
         }
 
-        // If no user ID from Telegram, try to get from URL params or use default
+        // If no user ID from Telegram, try to get from URL params
         if (!currentUserId) {
             const urlParams = new URLSearchParams(window.location.search);
-            currentUserId = urlParams.get('user_id') || '223720761'; // Default fallback
-            console.log('User ID from URL or default:', currentUserId);
+            const userIdFromUrl = urlParams.get('user_id');
+            console.log('User ID from URL (raw):', userIdFromUrl);
+            
+            if (userIdFromUrl) {
+                currentUserId = parseInt(userIdFromUrl);
+                console.log('User ID from URL (parsed):', currentUserId);
+            } else {
+                console.log('No user_id in URL params, trying to parse from hash...');
+                
+                // Try to parse user data from URL hash (tgWebAppData)
+                const hash = window.location.hash;
+                console.log('URL hash:', hash);
+                
+                if (hash.includes('tgWebAppData=')) {
+                    try {
+                        console.log('Found tgWebAppData in hash, attempting to parse...');
+                        const tgWebAppData = hash.split('tgWebAppData=')[1].split('&')[0];
+                        console.log('Extracted tgWebAppData:', tgWebAppData);
+                        
+                        const decodedData = decodeURIComponent(tgWebAppData);
+                        console.log('Decoded tgWebAppData:', decodedData);
+                        
+                        // Parse user data from the decoded string
+                        const userMatch = decodedData.match(/user%3D([^&]+)/);
+                        console.log('User match result:', userMatch);
+                        
+                        if (userMatch) {
+                            const userDataStr = decodeURIComponent(userMatch[1]);
+                            console.log('User data string:', userDataStr);
+                            
+                            const userData = JSON.parse(userDataStr);
+                            console.log('Parsed user data:', userData);
+                            
+                            if (userData.id) {
+                                currentUserId = userData.id;
+                                console.log('✅ Successfully extracted User ID from hash:', currentUserId);
+                            } else {
+                                console.log('❌ No id field in user data');
+                            }
+                        } else {
+                            console.log('❌ No user data found in tgWebAppData, trying alternative parsing...');
+                            
+                            // Alternative parsing method
+                            const userMatchAlt = decodedData.match(/user=([^&]+)/);
+                            console.log('Alternative user match result:', userMatchAlt);
+                            
+                            if (userMatchAlt) {
+                                const userDataStr = decodeURIComponent(userMatchAlt[1]);
+                                console.log('Alternative user data string:', userDataStr);
+                                
+                                const userData = JSON.parse(userDataStr);
+                                console.log('Alternative parsed user data:', userData);
+                                
+                                if (userData.id) {
+                                    currentUserId = userData.id;
+                                    console.log('✅ Successfully extracted User ID from alternative parsing:', currentUserId);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('❌ Error parsing tgWebAppData:', e);
+                        console.error('Error details:', e.message);
+                    }
+                } else {
+                    console.log('❌ No tgWebAppData found in hash');
+                }
+            }
         }
 
         console.log('Final currentUserId:', currentUserId);
+        console.log('Type of currentUserId:', typeof currentUserId);
         console.log('API_BASE:', API_BASE);
+
+        // Check if user ID is available
+        if (!currentUserId || isNaN(currentUserId)) {
+            console.error('No valid user ID available! Cannot load filters.');
+            console.error('Telegram WebApp available:', !!window.Telegram?.WebApp);
+            console.error('initDataUnsafe available:', !!window.Telegram?.WebApp?.initDataUnsafe);
+            console.error('User data available:', !!window.Telegram?.WebApp?.initDataUnsafe?.user);
+            console.error('URL params:', window.location.search);
+            
+            // For testing purposes, show a message with instructions
+            document.getElementById('filtersList').innerHTML = `
+                <div style="color: orange; padding: 20px; border: 1px solid orange; border-radius: 4px; margin: 20px 0;">
+                    <h3>⚠️ ID пользователя не определен</h3>
+                    <p>Для работы с фильтрами необходимо открыть эту страницу через Telegram бота.</p>
+                    <p><strong>Для тестирования:</strong> Добавьте параметр <code>?user_id=ВАШ_ID</code> к URL</p>
+                    <p><strong>Пример:</strong> <code>${window.location.origin}${window.location.pathname}?user_id=223720761</code></p>
+                </div>
+            `;
+        }
 
         // Global variable to track editing filter
         let editingFilterId = null;
         let priceFilterCounter = 0;
 
         // Load filters on page load
-        document.addEventListener('DOMContentLoaded', loadFilters);
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFilters();
+            setupWindowsCompatibility();
+            setupMobileCompatibility();
+        });
+        
+        // Windows compatibility fixes
+        function setupWindowsCompatibility() {
+            // Ensure all input fields work properly on Windows
+            document.addEventListener('input', function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                    // Force re-render to fix Windows input issues
+                    e.target.style.transform = 'translateZ(0)';
+                }
+            });
+            
+            // Fix focus issues on Windows
+            document.addEventListener('focusin', function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                    e.target.style.outline = 'none';
+                    e.target.style.borderColor = '#2481cc';
+                    e.target.style.boxShadow = '0 0 0 2px rgba(36, 129, 204, 0.2)';
+                }
+            });
+            
+            document.addEventListener('focusout', function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+                    e.target.style.borderColor = '#ddd';
+                    e.target.style.boxShadow = 'none';
+                }
+            });
+            
+            // Prevent input lag on Windows
+            document.addEventListener('keydown', function(e) {
+                if (e.target.tagName === 'INPUT') {
+                    // Clear any existing timeouts
+                    if (e.target._inputTimeout) {
+                        clearTimeout(e.target._inputTimeout);
+                    }
+                    
+                    // Force immediate update
+                    e.target._inputTimeout = setTimeout(function() {
+                        e.target.style.transform = 'translateZ(0)';
+                    }, 0);
+                }
+            });
+        }
+
+        // Mobile compatibility fixes for checkbox issues
+        function setupMobileCompatibility() {
+            // Function to setup checkbox handlers
+            function setupCheckboxHandlers(checkbox) {
+                // Remove existing listeners to avoid duplicates
+                checkbox.removeEventListener('touchstart', handleTouchStart);
+                checkbox.removeEventListener('touchend', handleTouchEnd);
+                checkbox.removeEventListener('click', handleClick);
+                
+                // Add touch event handlers for mobile
+                checkbox.addEventListener('touchstart', handleTouchStart);
+                checkbox.addEventListener('touchend', handleTouchEnd);
+                checkbox.addEventListener('click', handleClick);
+                
+                // Make checkbox more touch-friendly
+                checkbox.style.minWidth = '20px';
+                checkbox.style.minHeight = '20px';
+                checkbox.style.cursor = 'pointer';
+            }
+            
+            function handleTouchStart(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            function handleTouchEnd(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Toggle checkbox state
+                this.checked = !this.checked;
+                
+                // Trigger change event
+                const changeEvent = new Event('change', { bubbles: true });
+                this.dispatchEvent(changeEvent);
+                
+                // Force visual update
+                this.style.transform = 'scale(1.1)';
+                setTimeout(() => {
+                    this.style.transform = 'scale(1)';
+                }, 100);
+            }
+            
+            function handleClick(e) {
+                // Prevent default behavior that might not work on mobile
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Toggle checkbox state
+                this.checked = !this.checked;
+                
+                // Trigger change event
+                const changeEvent = new Event('change', { bubbles: true });
+                this.dispatchEvent(changeEvent);
+            }
+            
+            // Setup initial checkboxes
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(setupCheckboxHandlers);
+            
+            // Setup labels
+            function setupLabelHandlers(label) {
+                label.removeEventListener('touchstart', handleLabelTouchStart);
+                label.removeEventListener('touchend', handleLabelTouchEnd);
+                
+                label.addEventListener('touchstart', handleLabelTouchStart);
+                label.addEventListener('touchend', handleLabelTouchEnd);
+                
+                label.style.cursor = 'pointer';
+                label.style.userSelect = 'none';
+                label.style.webkitUserSelect = 'none';
+            }
+            
+            function handleLabelTouchStart(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            function handleLabelTouchEnd(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Find associated checkbox and toggle it
+                const checkbox = document.getElementById(this.getAttribute('for'));
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    const changeEvent = new Event('change', { bubbles: true });
+                    checkbox.dispatchEvent(changeEvent);
+                }
+            }
+            
+            const labels = document.querySelectorAll('label');
+            labels.forEach(setupLabelHandlers);
+            
+            // Make setupCheckboxHandlers globally available for dynamic content
+            window.setupCheckboxHandlers = setupCheckboxHandlers;
+        }
 
         // Handle form submission
         document.getElementById('filterForm').addEventListener('submit', async (e) => {
@@ -584,6 +901,10 @@
 
         async function loadFilters() {
             try {
+                if (!currentUserId) {
+                    throw new Error('User ID not available. Please open this page from Telegram bot.');
+                }
+
                 const url = `${API_BASE}/?user_id=${currentUserId}`;
                 console.log('Loading filters from URL:', url);
                 console.log('Current user ID:', currentUserId);
@@ -641,22 +962,46 @@
 
             } catch (error) {
                 console.error('Error loading filters:', error);
+                
+                let errorMessage = error.message;
+                let debugInfo = '';
+                
+                if (error.message.includes('User ID not available')) {
+                    errorMessage = 'Не удалось определить ID пользователя. Пожалуйста, откройте эту страницу через Telegram бота.';
+                    debugInfo = `
+                        <p><strong>Отладочная информация:</strong></p>
+                        <ul>
+                            <li>Telegram WebApp доступен: ${window.Telegram?.WebApp ? 'Да' : 'Нет'}</li>
+                            <li>initDataUnsafe доступен: ${window.Telegram?.WebApp?.initDataUnsafe ? 'Да' : 'Нет'}</li>
+                            <li>Данные пользователя доступны: ${window.Telegram?.WebApp?.initDataUnsafe?.user ? 'Да' : 'Нет'}</li>
+                            <li>URL параметры: ${window.location.search || 'Нет'}</li>
+                            <li>Текущий URL: ${window.location.href}</li>
+                        </ul>
+                    `;
+                }
+                
                 document.getElementById('filtersList').innerHTML = `
                     <div style="color: red; padding: 20px; border: 1px solid red; border-radius: 4px;">
-                        <h3>Error loading filters</h3>
-                        <p><strong>Error:</strong> ${error.message}</p>
+                        <h3>Ошибка загрузки фильтров</h3>
+                        <p><strong>Ошибка:</strong> ${errorMessage}</p>
                         <p><strong>URL:</strong> ${API_BASE}/?user_id=${currentUserId}</p>
-                        <p><strong>User ID:</strong> ${currentUserId}</p>
-                        <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
-                        <p>Check browser console (F12) for more details.</p>
+                        <p><strong>User ID:</strong> ${currentUserId} (тип: ${typeof currentUserId})</p>
+                        <p><strong>Время:</strong> ${new Date().toLocaleString('ru-RU')}</p>
+                        ${debugInfo}
+                        <p><strong>Решение:</strong> Откройте эту страницу через кнопку "Настроить фильтры" в Telegram боте.</p>
                     </div>
                 `;
             }
         }
 
         async function toggleFilter(filterId) {
+            if (!currentUserId) {
+                alert('User ID not available. Please open this page from Telegram bot.');
+                return;
+            }
+
             try {
-            const response = await fetch(`${API_BASE}/${filterId}/toggle`, {
+            const response = await fetch(`${API_BASE}/${filterId}/toggle?user_id=${currentUserId}`, {
                 method: 'POST'
             });
 
@@ -673,12 +1018,17 @@
         }
 
         async function deleteFilter(filterId) {
+            if (!currentUserId) {
+                alert('User ID not available. Please open this page from Telegram bot.');
+                return;
+            }
+
             if (!confirm('Are you sure you want to delete this filter?')) {
                 return;
             }
 
             try {
-                const response = await fetch(`${API_BASE}/${filterId}`, {
+                const response = await fetch(`${API_BASE}/${filterId}?user_id=${currentUserId}`, {
                     method: 'DELETE'
                 });
 
@@ -708,6 +1058,11 @@
             // Show form, hide main actions
             document.getElementById('filterFormContainer').classList.remove('hidden');
             document.getElementById('mainActions').classList.add('hidden');
+
+            // Setup mobile compatibility for all checkboxes
+            if (window.setupCheckboxHandlers) {
+                document.querySelectorAll('input[type="checkbox"]').forEach(window.setupCheckboxHandlers);
+            }
 
             // Scroll to form
             document.getElementById('filterFormContainer').scrollIntoView({ behavior: 'smooth' });
@@ -743,13 +1098,18 @@
                 });
 
                 // Set feature checkboxes
-                document.getElementById('has_balcony').checked = filter.has_balcony || false;
-                document.getElementById('has_air_conditioning').checked = filter.has_air_conditioning || false;
-                document.getElementById('has_internet').checked = filter.has_internet || false;
-                document.getElementById('has_furniture').checked = filter.has_furniture || false;
-                document.getElementById('has_parking').checked = filter.has_parking || false;
-                document.getElementById('has_garden').checked = filter.has_garden || false;
-                document.getElementById('has_pool').checked = filter.has_pool || false;
+                document.getElementById('has_balcony').checked = filter.has_balcony === true;
+                document.getElementById('has_air_conditioning').checked = filter.has_air_conditioning === true;
+                document.getElementById('has_internet').checked = filter.has_internet === true;
+                document.getElementById('has_furniture').checked = filter.has_furniture === true;
+                document.getElementById('has_parking').checked = filter.has_parking === true;
+                document.getElementById('has_garden').checked = filter.has_garden === true;
+                document.getElementById('has_pool').checked = filter.has_pool === true;
+
+                // Setup mobile compatibility for all checkboxes
+                if (window.setupCheckboxHandlers) {
+                    document.querySelectorAll('input[type="checkbox"]').forEach(window.setupCheckboxHandlers);
+                }
 
                 // Update form state
                 editingFilterId = filterId;
@@ -770,6 +1130,11 @@
         }
 
         async function saveFilter() {
+            if (!currentUserId) {
+                alert('User ID not available. Please open this page from Telegram bot.');
+                return;
+            }
+
             const formData = new FormData(document.getElementById('filterForm'));
             const data = {
                 name: formData.get('name'),
@@ -781,13 +1146,13 @@
                 min_area: formData.get('min_area') ? parseFloat(formData.get('min_area')) : null,
                 max_area: formData.get('max_area') ? parseFloat(formData.get('max_area')) : null,
                 districts: formData.get('districts') ? formData.get('districts').split(',').map(d => d.trim()).filter(d => d) : [],
-                has_balcony: formData.get('has_balcony') === 'on',
-                has_air_conditioning: formData.get('has_air_conditioning') === 'on',
-                has_internet: formData.get('has_internet') === 'on',
-                has_furniture: formData.get('has_furniture') === 'on',
-                has_parking: formData.get('has_parking') === 'on',
-                has_garden: formData.get('has_garden') === 'on',
-                has_pool: formData.get('has_pool') === 'on'
+                has_balcony: formData.get('has_balcony') === 'on' ? true : null,
+                has_air_conditioning: formData.get('has_air_conditioning') === 'on' ? true : null,
+                has_internet: formData.get('has_internet') === 'on' ? true : null,
+                has_furniture: formData.get('has_furniture') === 'on' ? true : null,
+                has_parking: formData.get('has_parking') === 'on' ? true : null,
+                has_garden: formData.get('has_garden') === 'on' ? true : null,
+                has_pool: formData.get('has_pool') === 'on' ? true : null
             };
 
             // Add user_id only for new filters
@@ -803,7 +1168,7 @@
             });
 
             try {
-                const url = editingFilterId ? `${API_BASE}/${editingFilterId}` : `${API_BASE}/`;
+                const url = editingFilterId ? `${API_BASE}/${editingFilterId}?user_id=${currentUserId}` : `${API_BASE}/`;
                 const method = editingFilterId ? 'PATCH' : 'POST';
 
                 const response = await fetch(url, {

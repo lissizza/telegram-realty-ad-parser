@@ -37,6 +37,7 @@ class RealEstateAd(BaseModel):
     property_type: Optional[PropertyType] = None
     rental_type: Optional[RentalType] = None
     rooms_count: Optional[int] = None
+    rooms: Optional[int] = None  # Alias for rooms_count for API compatibility
     area_sqm: Optional[float] = None
     price: Optional[float] = None  # Generic price field
     currency: Optional[str] = None  # Currency code (AMD, USD, RUB, EUR, GBP)
