@@ -99,6 +99,15 @@ def get_simple_filter_service() -> SimpleFilterService:
     return SimpleFilterService()
 
 
+@router.get("/user/{user_id}", response_model=List[SimpleFilter])
+async def get_simple_filters_by_user(
+    user_id: int,
+    service: SimpleFilterService = Depends(get_simple_filter_service)
+):
+    """Get simple filters for a specific user ID"""
+    return await service.get_active_filters(user_id)
+
+
 @router.get("/", response_model=List[SimpleFilter])
 async def get_simple_filters(
     user_id: Optional[int] = Query(None, description="Filter by user ID"),

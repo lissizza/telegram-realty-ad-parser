@@ -40,12 +40,15 @@ class TelegramNotificationService(NotificationService):
     ) -> bool:
         """Send message to user via Telegram bot"""
         try:
+            logger.info("Sending message to user %s via TelegramNotificationService", user_id)
             bot = await self._get_bot()
             if bot.application:
                 await bot.application.bot.send_message(
                     chat_id=user_id, text=message, parse_mode=parse_mode, reply_markup=reply_markup
                 )
+                logger.info("Message sent successfully to user %s", user_id)
                 return True
+            logger.warning("Bot application not available for user %s", user_id)
             return False
         except Exception as e:
             logger.error("Error sending message to user %s: %s", user_id, e)

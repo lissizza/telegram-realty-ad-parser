@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+    STARTUP_MESSAGE_LIMIT: int = Field(default=100, description="Number of recent messages to load on startup")
 
     # === CHANNEL SETTINGS (from .env) ===
     # FORWARDING_CHANNEL removed - we forward directly to bot chat

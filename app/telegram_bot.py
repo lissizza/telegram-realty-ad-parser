@@ -449,7 +449,7 @@ class TelegramBot:
                     return
 
                 # Call refilter method directly
-                result = await telegram_service.refilter_ads(count)
+                result = await telegram_service.refilter_ads(count, user_id)
 
                 # Format result message
                 result_text = "✅ **Фильтрация завершена!**\n\n"
@@ -748,6 +748,12 @@ class TelegramBot:
                 return
 
             # No authorization check needed (same as other commands)
+            
+            # Get user ID from update
+            user_id = update.effective_user.id if update.effective_user else None
+            if not user_id:
+                await query.edit_message_text("❌ Не удалось определить пользователя")
+                return
 
             # Show processing message
             await query.edit_message_text(f"🎯 Фильтрую {count} объявлений...")
@@ -761,7 +767,7 @@ class TelegramBot:
                     return
 
                 # Call refilter method directly
-                result = await telegram_service.refilter_ads(count)
+                result = await telegram_service.refilter_ads(count, user_id)
 
                 # Format result message
                 result_text = "✅ **Фильтрация завершена!**\n\n"

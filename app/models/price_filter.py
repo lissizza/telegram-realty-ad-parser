@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 class PriceFilter(BaseModel):
     """Model for price filtering criteria linked to a SimpleFilter"""
     
-    id: Optional[str] = None
     filter_id: str = Field(..., description="ID of the parent SimpleFilter")
     min_price: Optional[float] = Field(None, ge=0, description="Minimum price")
     max_price: Optional[float] = Field(None, ge=0, description="Maximum price")

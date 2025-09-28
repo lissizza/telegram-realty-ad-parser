@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -32,10 +33,16 @@ class TelegramService:
         # Cache for topic top_message IDs to reduce API calls
         self.topic_cache: Dict[tuple[int, int], int] = {}  # (channel_id, topic_id) -> top_message_id
         self._initialized = False
+        # Store active handlers for cleanup
+        self._active_handlers: List[Any] = []
+        # Store current user channels for handlers
+        self._current_user_channels: Dict[int, List[Dict]] = {}
 
     def set_notification_service(self, bot: Any) -> None:
         """Set the notification service with bot instance"""
+        logger.info("Setting notification service with bot instance")
         self.notification_service = TelegramNotificationService(bot)
+        logger.info("Notification service set successfully")
 
     async def _initialize_topic_cache(self) -> None:
         """Initialize topic cache with top_message IDs for common topics"""
@@ -103,7 +110,6 @@ class TelegramService:
             
             # Skip if already cached
             if cache_key in self.topic_cache:
-                logger.debug("Topic %s in channel %s already cached", topic_id, channel_id)
                 return
 
             # Get top_message and cache it
@@ -181,23 +187,186 @@ class TelegramService:
                             return
                         await self._process_message(event.message, user_id=None)
             else:
-                # Use user subscriptions for monitoring
-                channel_ids = list(user_channels.keys())
-                logger.info("Using user monitored channels: %s", channel_ids)
-                
-                @self.client.on(events.NewMessage(chats=channel_ids))
-                async def handle_new_message_user(event: events.NewMessage.Event) -> None:
-                    await self._handle_user_subscription_message(event, user_channels)
+                # Use user subscriptions for monitoring - register handlers for each channel
+                await self._register_channel_handlers(user_channels)
 
             self.is_monitoring = True
             logger.info("Started monitoring Telegram channels")
 
-            # Keep the client running
-            await self.client.run_until_disconnected()
+            # Start the client in background without blocking
+            logger.info("Starting Telegram client in background...")
+            
+            # Check if client is connected
+            if self.client.is_connected():
+                logger.info("Telegram client is already connected")
+            else:
+                logger.warning("Telegram client is not connected, attempting to start...")
+                try:
+                    await self.client.start(phone=settings.TELEGRAM_PHONE)
+                    logger.info("Telegram client started successfully")
+                except Exception as e:
+                    logger.error("Failed to start Telegram client: %s", e)
+                    raise
+            
+            # Create background task with error handling
+            async def run_client():
+                try:
+                    logger.info("Telegram client background task started")
+                    await self.client.run_until_disconnected()
+                    logger.info("Telegram client disconnected")
+                except Exception as e:
+                    logger.error("Error in Telegram client background task: %s", e)
+            
+            asyncio.create_task(run_client())
+            logger.info("Telegram client background task created")
+            
+            # Load recent messages from subscribed channels
+            await self._load_recent_messages_from_channels(user_channels, settings.STARTUP_MESSAGE_LIMIT)
 
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error starting monitoring: %s", e)
             raise
+
+    async def _load_recent_messages_from_channels(self, user_channels: Dict[int, List[Dict]], limit: int = 100) -> None:
+        """Load recent messages from subscribed channels on startup with proper topic filtering"""
+        try:
+            logger.info("Loading recent messages from %d channels (limit: %d)", len(user_channels), limit)
+            
+            total_loaded = 0
+            total_processed = 0
+            total_messages_found = 0
+            
+            for channel_id, subscriptions in user_channels.items():
+                try:
+                    logger.info("Loading messages from channel %s", channel_id)
+                    
+                    # Get the channel entity
+                    channel_entity = await self.client.get_entity(channel_id)
+                    
+                    # Load recent messages
+                    messages = await self.client.get_messages(channel_entity, limit=limit)
+                    
+                    logger.info("Found %d messages in channel %s", len(messages), channel_id)
+                    total_messages_found += len(messages)
+                    
+                    # Process each message
+                    for message in messages:
+                        # Check if message already exists in database
+                        db = mongodb.get_database()
+                        existing_message = await db.incoming_messages.find_one({
+                            "id": message.id,
+                            "channel_id": message.chat_id
+                        })
+                        
+                        if existing_message:
+                            logger.info("Message %s already exists in database, stopping processing (stop_on_existing=True)", message.id)
+                            break  # Stop processing on first existing message
+                        
+                        # Process message for each matching subscription
+                        for subscription in subscriptions:
+                            user_id = subscription["user_id"]
+                            topic_id = subscription["topic_id"]
+                            monitor_all_topics = subscription["monitor_all_topics"]
+                            monitored_topics = subscription["monitored_topics"]
+                            
+                            # Check if message matches subscription criteria
+                            should_process = False
+                            
+                            if monitor_all_topics:
+                                should_process = True
+                                logger.info("Processing message %s for user %s (monitor all topics)", message.id, user_id)
+                            elif topic_id and monitored_topics:
+                                # Check if message is in monitored topics
+                                if topic_id in monitored_topics:
+                                    should_process = True
+                                    logger.info("Processing message %s for user %s (monitored topic %s)", message.id, user_id, topic_id)
+                            elif topic_id:
+                                # Use top_message approach for single topic
+                                if await self._is_message_in_topic(message, channel_id, topic_id):
+                                    should_process = True
+                                    logger.info("Processing message %s for user %s (topic %s)", message.id, user_id, topic_id)
+                            else:
+                                # Monitor main channel (no topic filtering) - process all messages
+                                should_process = True
+                                logger.info("Processing message %s for user %s (main channel)", message.id, user_id)
+                            
+                            if should_process:
+                                # Process message through full pipeline (LLM + filters)
+                                await self._process_message_for_user(message, user_id, subscription)
+                                total_processed += 1
+                        
+                        total_loaded += 1
+                        
+                except Exception as e:
+                    logger.error("Error loading messages from channel %s: %s", channel_id, e)
+                    continue
+            
+            logger.info("Found %d total messages, loaded %d text messages, processed %d", total_messages_found, total_loaded, total_processed)
+            
+        except Exception as e:
+            logger.error("Error loading recent messages: %s", e)
+
+
+
+    async def _register_channel_handlers(self, user_channels: Dict[int, List[Dict]]) -> None:
+        """Register event handlers for each monitored channel"""
+        try:
+            # Clear existing handlers
+            await self._clear_handlers()
+            
+            channel_ids = list(user_channels.keys())
+            logger.info("Registering handlers for channels: %s", channel_ids)
+            
+            # Store user_channels for use in handler
+            self._current_user_channels = user_channels
+            
+            # Register separate handler for each channel
+            for channel_id in channel_ids:
+                @self.client.on(events.NewMessage(chats=[channel_id]))
+                async def handle_new_message_user(event: events.NewMessage.Event) -> None:
+                    logger.info("Received new message event: %s from channel %s", event.message.id, event.message.chat_id)
+                    await self._handle_user_subscription_message(event, self._current_user_channels)
+                
+                # Store handler reference for cleanup
+                self._active_handlers.append(handle_new_message_user)
+            
+            logger.info("Registered separate handlers for %d channels", len(channel_ids))
+            
+        except Exception as e:
+            logger.error("Error registering channel handlers: %s", e)
+            raise
+
+    async def _clear_handlers(self) -> None:
+        """Clear all active event handlers"""
+        try:
+            # Note: Telethon doesn't provide easy way to remove specific handlers
+            # We'll rely on re-registering handlers with updated channels
+            self._active_handlers.clear()
+            logger.info("Cleared all event handlers")
+        except Exception as e:
+            logger.error("Error clearing handlers: %s", e)
+
+    async def update_channel_monitoring(self) -> None:
+        """Update channel monitoring when subscriptions change"""
+        try:
+            if not self.is_monitoring:
+                logger.warning("Monitoring not active, cannot update channels")
+                return
+                
+            # Get current user channels
+            user_channels = await self._get_user_monitored_channels()
+            
+            if not user_channels:
+                logger.warning("No user channels found for monitoring update")
+                return
+                
+            # Re-register handlers with updated channels
+            await self._register_channel_handlers(user_channels)
+            
+            logger.info("Updated channel monitoring with %d channels", len(user_channels))
+            
+        except Exception as e:
+            logger.error("Error updating channel monitoring: %s", e)
 
     async def _handle_user_subscription_message(self, event: events.NewMessage.Event, user_channels: Dict[int, List[Dict]]) -> None:
         """Handle new message from user subscribed channels using top_message filtering"""
@@ -220,29 +389,33 @@ class TelegramService:
                 monitor_all_topics = subscription["monitor_all_topics"]
                 monitored_topics = subscription["monitored_topics"]
                 
-                # Check if message matches subscription criteria using top_message approach
+                # Check if message matches subscription criteria
                 should_process = False
                 
                 if monitor_all_topics:
                     # Monitor all topics in this channel - process all messages
                     should_process = True
-                    logger.info("Processing message for user %s (monitor_all_topics=True)", user_id)
-                elif topic_id:
+                    logger.info("Processing message %s for user %s (monitor_all_topics=True)", message.id, user_id)
+                elif topic_id and topic_id is not None:
                     # Monitor specific topic - check if message belongs to this topic
                     should_process = await self._is_message_in_topic(message, chat_id, topic_id)
                     if should_process:
-                        logger.info("Processing message for user %s (topic_id=%s)", user_id, topic_id)
-                elif monitored_topics:
+                        logger.info("Processing message %s for user %s (topic_id=%s)", message.id, user_id, topic_id)
+                    else:
+                        logger.info("Skipping message %s for user %s (not in topic %s)", message.id, user_id, topic_id)
+                elif monitored_topics and len(monitored_topics) > 0:
                     # Monitor specific topics from list - check if message belongs to any of them
                     for t_id in monitored_topics:
                         if await self._is_message_in_topic(message, chat_id, t_id):
                             should_process = True
-                            logger.info("Processing message for user %s (monitored_topics=%s, matched=%s)", user_id, monitored_topics, t_id)
+                            logger.info("Processing message %s for user %s (monitored_topics=%s, matched=%s)", message.id, user_id, monitored_topics, t_id)
                             break
+                    if not should_process:
+                        logger.info("Skipping message %s for user %s (not in any monitored topics %s)", message.id, user_id, monitored_topics)
                 else:
-                    # Monitor main channel (no topic filtering) - process all messages
+                    # No topic filtering - process all messages from channel
                     should_process = True
-                    logger.info("Processing message for user %s (main channel)", user_id)
+                    logger.info("Processing message %s for user %s (no topic filtering)", message.id, user_id)
                 
                 if should_process:
                     # Process message for this user
@@ -398,7 +571,9 @@ class TelegramService:
             
             subscription_service = UserChannelSubscriptionService()
             if user_id:
-                subscriptions = await subscription_service.get_user_subscriptions(user_id, active_only=True)
+                subscriptions = await subscription_service.get_user_subscriptions(user_id)
+                # Filter only active subscriptions
+                subscriptions = [sub for sub in subscriptions if sub.is_active]
                 logger.info("Found %d active subscriptions for user %s", len(subscriptions), user_id)
             else:
                 subscriptions = await subscription_service.get_all_active_subscriptions()
@@ -480,10 +655,8 @@ class TelegramService:
             rt = getattr(message, "reply_to", None)
             if rt:
                 reply_to_top_id = getattr(rt, "reply_to_top_id", None)
-                logger.debug("Message %s: reply_to_top_id=%s (sub-topic, skipping)", message.id, reply_to_top_id)
                 return False
             else:
-                logger.debug("Message %s: no reply_to (main topic, processing)", message.id)
                 return True
 
         except Exception as e:  # pylint: disable=broad-except
@@ -496,7 +669,6 @@ class TelegramService:
             # For user subscription monitoring, we should process all messages
             # The filtering by channel and topic is already done in _handle_user_subscription_message
             # If there's a topic_id in the subscription, it will be checked there
-            logger.debug("Message %s from channel %s, processing (user subscription mode)", message.id, message.chat_id)
             return True
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error checking subchannel: %s", e)
@@ -614,25 +786,21 @@ class TelegramService:
     async def _process_message(self, message: Message, force: bool = False, user_id: Optional[int] = None) -> None:
         """Process incoming message"""
         real_estate_ad = None  # Initialize variable
-        logger.info("DEBUG: _process_message called for message %s", message.id)
-        logger.info("DEBUG: Message type: %s", type(message))
-        logger.info("DEBUG: Message chat_id: %s", message.chat_id)
-        logger.info("DEBUG: Message text: %s", message.text[:100] if message.text else "None")
-        logger.info("DEBUG: About to enter try block")
         try:
+            # Log message details for debugging
+            logger.info("Processing message %s from channel %s", message.id, message.chat_id)
+            if message.text:
+                logger.info("Message text: %s", message.text[:200] + "..." if len(message.text) > 200 else message.text)
+            
             # Check if message is from monitored subchannel (topic)
             if not self._is_from_monitored_subchannel(message):
-                logger.debug("Message %s not from monitored subchannel, skipping", message.id)
                 return
 
-            logger.debug("Message %s is from monitored subchannel, continuing", message.id)
 
             # Check if message is media-only (skip processing completely)
             if self._is_media_only_message(message):
-                logger.debug("Message %s is media-only, skipping completely", message.id)
                 return
 
-            logger.debug("Message %s is not media-only, continuing", message.id)
             # Check if message already processed
             db = mongodb.get_database()
             existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
@@ -640,11 +808,6 @@ class TelegramService:
             if existing_post:
                 # Check if we need to reprocess (e.g., if status is ERROR or force=True)
                 if not force and existing_post.get("processing_status") not in ["error"]:
-                    logger.debug(
-                        "Message %s already processed with status %s, skipping",
-                        message.id,
-                        existing_post.get("processing_status"),
-                    )
                     return
 
                 logger.info(
@@ -685,11 +848,6 @@ class TelegramService:
                 "forwarded_to": None,
             }
 
-            logger.debug("Created post_data for message %s", message.id)
-            logger.debug("Message date type: %s", type(message.date))
-            logger.debug("Message chat_id: %s", message.chat_id)
-            logger.debug("Message text length: %s", len(message.text or ""))
-            logger.debug("Channel title: %s", channel_title)
 
             # Save or update IncomingMessage first
             if existing_post:
@@ -697,12 +855,10 @@ class TelegramService:
                 result = await db.incoming_messages.update_one(
                     {"id": message.id, "channel_id": message.chat_id}, {"$set": post_data}
                 )
-                logger.debug("Updated incoming_message for %s: %s modified", message.id, result.modified_count)
                 incoming_message_id = str(existing_post["_id"])
             else:
                 # Insert new post
                 result = await db.incoming_messages.insert_one(post_data)
-                logger.debug("Inserted incoming_message for %s: %s", message.id, result.inserted_id)
                 incoming_message_id = str(result.inserted_id)
 
             # Try to parse as real estate ad using LLM
@@ -816,7 +972,7 @@ class TelegramService:
 
                     # Forward if matches
                     for filter_id in filter_result["matching_filters"]:
-                        await self._forward_post(message, real_estate_ad, filter_id)
+                        await self._forward_post(message, real_estate_ad, filter_id, target_user_id=user_id)
 
             else:
                 # Message has no text, skip processing
@@ -871,13 +1027,19 @@ class TelegramService:
             except Exception as update_error:  # pylint: disable=broad-except
                 logger.error("Error updating post status to error: %s", update_error)
 
-    async def _forward_post(self, message: Optional[Message], real_estate_ad: Any, filter_id: str, filter_name: Optional[str] = None) -> None:
+    async def _forward_post(self, message: Optional[Message], real_estate_ad: Any, filter_id: str, filter_name: Optional[str] = None, target_user_id: Optional[int] = None) -> None:
         """Forward post to user via bot"""
         try:
-            # Get user ID from settings (your Telegram user ID)
-            user_id = await user_service.get_primary_user_id()
+            # Use target_user_id if provided, otherwise get primary user ID
+            if target_user_id:
+                user_id = target_user_id
+                logger.info("Using target_user_id: %s", user_id)
+            else:
+                user_id = await user_service.get_primary_user_id()
+                logger.info("Using primary user_id: %s", user_id)
+                
             if not user_id:
-                logger.warning("No authorized users found, skipping notification")
+                logger.warning("No user ID found, skipping notification")
                 return
 
             # Create formatted message with filter information
@@ -889,9 +1051,12 @@ class TelegramService:
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             if self.notification_service:
+                logger.info("Calling notification_service.send_message for user %s", user_id)
                 await self.notification_service.send_message(
                     user_id=user_id, message=formatted_message, parse_mode="MarkdownV2", reply_markup=reply_markup
                 )
+            else:
+                logger.warning("Notification service is not available for user %s", user_id)
 
             # Save forwarding record
             db = mongodb.get_database()
@@ -903,20 +1068,16 @@ class TelegramService:
                 topic_title = await self._get_topic_title(real_estate_ad.original_channel_id, real_estate_ad.original_topic_id)
             
             forwarding_data = {
-                "original_post_id": message.id,
-                "original_channel_id": message.chat_id,
                 "real_estate_ad_id": real_estate_ad.id,
                 "filter_id": filter_id,
-                "user_id": user_id,
-                "processing_status": "forwarded",
-                "message": formatted_message,
+                "sent_to": user_id,
+                "sent_at": datetime.now(timezone.utc),
                 "channel_id": real_estate_ad.original_channel_id,
-                "channel_username": channel_info.get('username') if channel_info else None,
-                "channel_title": channel_info.get('title') if channel_info else None,
+                "channel_title": channel_info.get("title") if channel_info else None,
                 "topic_id": real_estate_ad.original_topic_id,
                 "topic_title": topic_title,
             }
-            await db.forwarded_posts.insert_one(forwarding_data)
+            await db.outgoing_posts.insert_one(forwarding_data)
 
             # Update post status to forwarded
             await db.incoming_messages.update_one(
@@ -957,7 +1118,7 @@ class TelegramService:
 
         return groups
 
-    async def reprocess_recent_messages(self, num_messages: int, force: bool = False, user_id: Optional[int] = None, channel_id: Optional[int] = None) -> dict:
+    async def reprocess_recent_messages(self, num_messages: int, force: bool = False, user_id: Optional[int] = None, channel_id: Optional[int] = None, stop_on_existing: bool = False) -> dict:
         """Reprocess N recent messages from monitored channels"""
         logger.info("Starting reprocess_recent_messages: num_messages=%s, force=%s, user_id=%s", num_messages, force, user_id)
 
@@ -1034,9 +1195,6 @@ class TelegramService:
                 
                 if should_process:
                     messages.append(message)
-                    logger.debug("Message %s: processing for user %s", message.id, user_id)
-                else:
-                    logger.debug("Message %s: skipping (doesn't match criteria)", message.id)
 
             recent_messages.extend(messages)
             logger.info("Fetched %s messages from channel %s", len(messages), channel_id)
@@ -1087,6 +1245,11 @@ class TelegramService:
 
             if existing_post:
                 current_status = existing_post.get("processing_status")
+                
+                # If stop_on_existing is True and message exists, stop processing
+                if stop_on_existing and not force:
+                    logger.info("Found existing message %s, stopping processing (stop_on_existing=True)", main_message.id)
+                    break
 
                 if force:
                     # Force reprocessing - reset status
@@ -1105,9 +1268,6 @@ class TelegramService:
                         "not_real_estate",
                         "media_only",
                     ]:
-                        logger.debug(
-                            "Message %s already processed with status %s, skipping", main_message.id, current_status
-                        )
                         stats["skipped"] += 1
                         continue
                     elif current_status == "error":
@@ -1451,7 +1611,6 @@ class TelegramService:
             
             # Cache the result
             self.topic_cache[cache_key] = top_message
-            logger.debug("Cached top_message %s for channel %s, topic %s", top_message, channel_id, topic_id)
             
             return top_message
         except Exception as e:
@@ -1490,7 +1649,6 @@ class TelegramService:
                 top_msg = await self._get_top_message_for_topic(channel_id, topic_id)
                 if top_msg:
                     self.topic_cache[cache_key] = top_msg
-                    logger.debug("Cached top_message %s for channel %s, topic %s", top_msg, channel_id, topic_id)
                 else:
                     logger.warning("Could not get top message for topic %s in channel %s", topic_id, channel_id)
                     return False
@@ -1507,8 +1665,8 @@ class TelegramService:
             
             result = is_top_message or is_reply_to_top
             
-            logger.debug("Message %s in topic %s: is_top=%s, is_reply_to_top=%s, result=%s", 
-                        message.id, topic_id, is_top_message, is_reply_to_top, result)
+            logger.info("Topic check for message %s: top_msg=%s, reply_to_msg_id=%s, is_top_message=%s, is_reply_to_top=%s, result=%s", 
+                       message.id, top_msg, reply_to_msg_id, is_top_message, is_reply_to_top, result)
             
             return result
             
@@ -1516,7 +1674,7 @@ class TelegramService:
             logger.error("Error checking if message %s is in topic %s: %s", message.id, topic_id, e)
             return False
 
-    async def refilter_ads(self, count: int) -> dict:
+    async def refilter_ads(self, count: int, user_id: Optional[int] = None) -> dict:
         """Refilter existing ads without reprocessing using new UserFilterMatch architecture"""
         try:
             logger.info("Starting refilter for %s ads", count)
@@ -1541,12 +1699,27 @@ class TelegramService:
             user_filters_cursor = db.simple_filters.find({"is_active": True})
             user_filters = {}
             async for filter_doc in user_filters_cursor:
-                user_id = filter_doc.get("user_id")
-                if user_id not in user_filters:
-                    user_filters[user_id] = []
-                user_filters[user_id].append(filter_doc)
+                filter_user_id = filter_doc.get("user_id")
+                if filter_user_id not in user_filters:
+                    user_filters[filter_user_id] = []
+                user_filters[filter_user_id].append(filter_doc)
             
             logger.info("Found filters for %s users", len(user_filters))
+
+            # If specific user_id is provided, filter only for that user
+            if user_id is not None:
+                if user_id in user_filters:
+                    user_filters = {user_id: user_filters[user_id]}
+                    logger.info("Filtering only for user %s", user_id)
+                else:
+                    logger.warning("No filters found for user %s", user_id)
+                    return {
+                        "total_checked": len(ads_list),
+                        "matched_filters": 0,
+                        "forwarded": 0,
+                        "errors": 0,
+                        "message": f"No active filters found for user {user_id}",
+                    }
 
             if not user_filters:
                 logger.warning("No active filters found")
@@ -1572,85 +1745,34 @@ class TelegramService:
                     # Convert to RealEstateAd object
                     ad = RealEstateAd(**ad_doc)
 
-                    # Check against all users' filters
+                    # Check against all users' filters using centralized service (DRY principle)
                     for user_id, user_filter_docs in user_filters.items():
-                        matching_filters = []
+                        try:
+                            # Use centralized filter checking service instead of duplicating logic
+                            filter_result = await filter_service.check_filters(ad, user_id)
+                            
+                            matching_filters = filter_result.get("matching_filters", [])
+                            filter_details = filter_result.get("filter_details", {})
+                            
+                            logger.info("Ad %s (rooms=%s, price=%s %s) checked against user %s filters: %d matches", 
+                                       ad.original_post_id, ad.rooms_count, ad.price, ad.currency, user_id, len(matching_filters))
                         
-                        for filter_doc in user_filter_docs:
-                            filter_obj = SimpleFilter(**filter_doc)
-                            
-                            # Get price filters for this filter
-                            price_filters = []
-                            if filter_obj.id:
-                                price_filters = await filter_service.price_filter_service.get_price_filters_by_filter_id(str(filter_obj.id))
-                            
-                            # Debug logging
-                            logger.info("Checking ad %s (rooms=%s) against filter %s (min_rooms=%s, max_rooms=%s)", 
-                                       ad.original_post_id, ad.rooms_count, filter_obj.name, 
-                                       filter_obj.min_rooms, filter_obj.max_rooms)
-                            
-                            # Use the new method that includes price filters
-                            if price_filters:
-                                matches = filter_obj.matches_with_price_filters(ad, price_filters)
+                            # Forward to user using the first matching filter
+                            if matching_filters:
+                                first_filter_id = matching_filters[0]
+                                filter_name = filter_details.get(first_filter_id, {}).get("name", "unknown")
+                                
+                                await self._forward_post(None, ad, first_filter_id, filter_name, user_id)
+                                forwarded += 1
+                                logger.info("Ad %s forwarded to user %s with filter %s", 
+                                           ad.original_post_id, user_id, filter_name)
                             else:
-                                matches = filter_obj.matches(ad)
-                            
-                            if matches:
-                                filter_id = str(filter_doc["_id"]) if filter_doc.get("_id") else "unknown"
-                                matching_filters.append(filter_id)
-                                logger.info("Ad %s matched filter %s for user %s", 
-                                           ad.original_post_id, filter_obj.name, user_id)
-                            else:
-                                logger.info("Ad %s did NOT match filter %s for user %s", 
-                                           ad.original_post_id, filter_obj.name, user_id)
-                        
-                        # Create UserFilterMatch records for matching filters
-                        if matching_filters:
-                            # Note: matched_filters is now handled via UserFilterMatch model
-                            
-                            for filter_id in matching_filters:
-                                # Find the filter name for this filter_id
-                                filter_name = None
-                                for filter_doc in user_filter_docs:
-                                    if str(filter_doc["_id"]) == filter_id:
-                                        filter_name = filter_doc.get("name", "Unknown Filter")
-                                        break
-                                
-                                # Skip if filter_id is "unknown"
-                                if filter_id == "unknown":
-                                    logger.warning("Skipping filter with unknown ID for user %s", user_id)
-                                    continue
-                                
-                                # Create match record
-                                match_id = await match_service.create_match(
-                                    user_id=user_id,
-                                    filter_id=filter_id,
-                                    real_estate_ad_id=ad.id or str(ad_doc["_id"])
-                                )
-                                
-                                if match_id:
-                                    logger.info("Created UserFilterMatch: %s", match_id)
+                                logger.info("Ad %s did not match any filters for user %s", 
+                                           ad.original_post_id, user_id)
                                     
-                                    # Forward the ad if not already forwarded for this user
-                                    existing_forward = await db.outgoing_posts.find_one({
-                                        "real_estate_ad_id": ad.id or str(ad_doc["_id"]),
-                                        "sent_to": str(user_id)
-                                    })
-                                    
-                                    if not existing_forward:
-                                        try:
-                                            # Forward post with filter name
-                                            await self._forward_post(None, ad, filter_id, filter_name)
-                                            forwarded += 1
-                                            logger.info("Ad %s forwarded to user %s with filter %s", ad.original_post_id, user_id, filter_name)
-                                            
-                                            # Mark match as forwarded
-                                            await match_service.mark_as_forwarded(match_id)
-                                            
-                                        except Exception as e:  # pylint: disable=broad-except
-                                            logger.error("Error forwarding ad %s to user %s: %s", 
-                                                       ad.original_post_id, user_id, e)
-                                            errors += 1
+                        except Exception as e:
+                            logger.error("Error checking filters for ad %s, user %s: %s", ad.original_post_id, user_id, e)
+                            errors += 1
 
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error("Error processing ad %s: %s", ad_doc.get("_id"), e)

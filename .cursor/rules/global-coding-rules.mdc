@@ -37,6 +37,27 @@ alwaysApply: true
 2. **Docstrings**: Write docstrings for classes and public methods
 3. **Exception Handling**: Use specific exceptions when possible, avoid bare `except:`
 
+## DRY Principle (Don't Repeat Yourself)
+
+1. **Single Source of Truth**: Each piece of business logic should exist in only one place
+
+   - ✅ Correct: Use `SimpleFilterService.check_filters()` everywhere
+   - ❌ Wrong: Rewrite filtering logic in multiple places
+
+2. **Reuse Existing Services**: Always use existing service methods instead of duplicating code
+
+3. **Centralize Business Logic**: Keep business rules in dedicated service classes
+   Example:
+
+   - Filter matching → `SimpleFilterService`
+   - Price filtering → `PriceFilterService`
+   - User management → `UserService`
+
+4. **Avoid Code Duplication**: If you find yourself copying code, extract it to a shared method
+   - Create utility functions for common operations
+   - Use composition over inheritance
+   - Prefer dependency injection over hardcoded dependencies
+
 ## Import Organization
 
 1. **Import Placement**: All imports must be at the top of the file

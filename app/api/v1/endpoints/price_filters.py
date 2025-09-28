@@ -27,7 +27,6 @@ class PriceFilterUpdate(BaseModel):
 
 class PriceFilterResponse(BaseModel):
     """Response model for price filter"""
-    id: str
     filter_id: str
     min_price: Optional[float] = None
     max_price: Optional[float] = None
@@ -53,7 +52,6 @@ async def get_price_filters(
         
         return [
             PriceFilterResponse(
-                id=pf.id or "",
                 filter_id=pf.filter_id,
                 min_price=pf.min_price,
                 max_price=pf.max_price,

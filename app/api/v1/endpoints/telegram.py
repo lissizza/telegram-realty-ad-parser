@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -19,6 +21,13 @@ class StopMonitoringRequest(BaseModel):
 class RefilterRequest(BaseModel):
     """Request model for refiltering ads"""
     count: int
+    user_id: Optional[int] = None
+
+
+class ReprocessRequest(BaseModel):
+    """Request model for reprocessing messages"""
+    channel_id: Optional[int] = None
+    limit: int = 50
 
 
 @router.post("/start-monitoring")
@@ -71,8 +80,9 @@ async def get_monitoring_status():
 async def refilter_ads(request: RefilterRequest):
     """Refilter existing ads without reprocessing"""
     try:
-        telegram_service = TelegramService()
-        result = await telegram_service.refilter_ads(request.count)
+        from app.services import get_telegram_service
+        telegram_service = get_telegram_service()
+        result = await telegram_service.refilter_ads(request.count, request.user_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 

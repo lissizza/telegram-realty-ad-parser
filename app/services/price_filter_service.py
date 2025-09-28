@@ -36,6 +36,8 @@ class PriceFilterService:
         try:
             db = mongodb.get_database()
             
+            logger.info("Searching for price filters with filter_id: %s", filter_id)
+            
             cursor = db.price_filters.find({
                 "filter_id": filter_id,
                 "is_active": True
@@ -43,8 +45,19 @@ class PriceFilterService:
             
             price_filters = []
             async for doc in cursor:
-                doc["id"] = str(doc["_id"])
-                price_filters.append(PriceFilter(**doc))
+                logger.info("Found price filter: %s", doc)
+                # Remove _id field as it's not part of the model
+                doc.pop("_id", None)
+                # Ensure required fields are present
+                if "is_active" not in doc:
+                    doc["is_active"] = True
+                try:
+                    price_filter = PriceFilter(**doc)
+                    price_filters.append(price_filter)
+                except Exception as validation_error:
+                    logger.error("Validation error for price filter: %s", validation_error)
+                    logger.error("Document data: %s", doc)
+                    raise
             
             logger.info("Found %d price filters for filter %s", len(price_filters), filter_id)
             return price_filters

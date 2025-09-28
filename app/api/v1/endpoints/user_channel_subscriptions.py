@@ -134,6 +134,15 @@ async def create_user_subscription(
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Failed to create subscription")
         
+        # Update channel monitoring to include new subscription
+        try:
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            await telegram_service.update_channel_monitoring()
+            logger.info("Updated channel monitoring after creating subscription %s", subscription_id)
+        except Exception as e:
+            logger.warning("Failed to update channel monitoring: %s", e)
+        
         return {
             "message": "Subscription created successfully",
             "subscription_id": subscription_id
@@ -230,6 +239,15 @@ async def quick_add_channel(
         
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Failed to create subscription")
+        
+        # Update channel monitoring to include new subscription
+        try:
+            from app.services import get_telegram_service
+            telegram_service = get_telegram_service()
+            await telegram_service.update_channel_monitoring()
+            logger.info("Updated channel monitoring after quick adding subscription %s", subscription_id)
+        except Exception as e:
+            logger.warning("Failed to update channel monitoring: %s", e)
         
         return {
             "message": "Channel subscription created successfully",

@@ -101,9 +101,14 @@ class SimpleFilterService:
                 
                 # Check if filter matches (including price filters)
                 if price_filters:
+                    logger.info("Filter '%s' has %d price filters: %s", filter_obj.name, len(price_filters), 
+                               [(pf.min_price, pf.max_price, pf.currency) for pf in price_filters])
+                    logger.info("Ad price: %s %s", real_estate_ad.price, real_estate_ad.currency)
                     # Use new method that includes price filter matching
                     matches = filter_obj.matches_with_price_filters(real_estate_ad, price_filters)
+                    logger.info("Filter '%s' matches after price check: %s", filter_obj.name, matches)
                 else:
+                    logger.info("Filter '%s' has no price filters, using basic matching", filter_obj.name)
                     # Use old method for filters without price filters
                     matches = filter_obj.matches(real_estate_ad)
                 
