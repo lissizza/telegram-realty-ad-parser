@@ -86,6 +86,7 @@ coverage.xml
 .env.development.local
 .env.test.local
 .env.production.local
+.env.backup
 
 # Data files
 data/
