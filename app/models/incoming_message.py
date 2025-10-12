@@ -5,6 +5,7 @@ Model for incoming messages from Telegram channels
 from datetime import datetime, UTC
 from typing import Optional, List
 from pydantic import BaseModel, Field
+from app.models.status_enums import IncomingMessageStatus
 
 
 class IncomingMessage(BaseModel):
@@ -16,6 +17,7 @@ class IncomingMessage(BaseModel):
     topic_id: Optional[int] = None  # Topic ID for topic-based channels
     channel_title: str
     message: str
+    message_hash: Optional[str] = None  # Hash of message content for duplicate detection
     date: datetime
     
     # Message statistics (from Telegram)
@@ -28,7 +30,7 @@ class IncomingMessage(BaseModel):
     media_url: Optional[str] = None
     
     # Processing status
-    processing_status: str = Field(default="pending", description="pending, processing, completed, failed")
+    processing_status: IncomingMessageStatus = Field(default=IncomingMessageStatus.PENDING)
     processed_at: Optional[datetime] = None
     parsing_errors: List[str] = []
     

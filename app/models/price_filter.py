@@ -1,6 +1,7 @@
 from datetime import datetime, UTC
 from typing import Optional
 from pydantic import BaseModel, Field
+from app.models.telegram import Currency
 
 
 class PriceFilter(BaseModel):
@@ -9,7 +10,7 @@ class PriceFilter(BaseModel):
     filter_id: str = Field(..., description="ID of the parent SimpleFilter")
     min_price: Optional[float] = Field(None, ge=0, description="Minimum price")
     max_price: Optional[float] = Field(None, ge=0, description="Maximum price")
-    currency: str = Field(..., description="Currency code (AMD, USD, EUR, etc.)")
+    currency: Currency = Field(..., description="Currency code")
     is_active: bool = Field(default=True, description="Whether this price filter is active")
     
     # Timestamps
@@ -21,13 +22,17 @@ class PriceFilter(BaseModel):
             datetime: lambda v: v.isoformat()
         }
     
-    def matches_price(self, price: Optional[float], currency: Optional[str]) -> bool:
+    def matches_price(self, price: Optional[float], currency) -> bool:
         """Check if given price and currency match this price filter"""
         if price is None or currency is None:
             return False
+        
+        # Convert currency to string for comparison (handle both enum and string)
+        currency_str = currency.value if hasattr(currency, 'value') else str(currency)
+        filter_currency_str = self.currency.value if hasattr(self.currency, 'value') else str(self.currency)
             
         # Currency must match exactly
-        if currency != self.currency:
+        if currency_str != filter_currency_str:
             return False
             
         # Check price range

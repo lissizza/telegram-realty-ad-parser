@@ -2,7 +2,8 @@ from datetime import datetime, UTC
 from typing import List, Optional
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+from app.models.status_enums import RealEstateAdStatus
 
 
 class PropertyType(str, Enum):
@@ -19,13 +20,22 @@ class RentalType(str, Enum):
     DAILY = "daily"
 
 
+class Currency(str, Enum):
+    """Currency enumeration"""
+    AMD = "AMD"
+    USD = "USD"
+    RUB = "RUB"
+    EUR = "EUR"
+    GBP = "GBP"
+
+
 # TelegramPost removed - use IncomingMessage for incoming messages
 # and OutgoingPost for messages we send
 
 
 class RealEstateAd(BaseModel):
     """Model for parsed real estate advertisement"""
-    id: Optional[str] = None
+    id: Optional[str] = Field(default=None, alias="_id")  # Maps to MongoDB _id
     incoming_message_id: Optional[str] = None  # Link to IncomingMessage
     original_post_id: int
     original_channel_id: int
@@ -40,7 +50,7 @@ class RealEstateAd(BaseModel):
     rooms: Optional[int] = None  # Alias for rooms_count for API compatibility
     area_sqm: Optional[float] = None
     price: Optional[float] = None  # Generic price field
-    currency: Optional[str] = None  # Currency code (AMD, USD, RUB, EUR, GBP)
+    currency: Currency = Field(default=Currency.AMD)  # Currency code with default AMD
     district: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -62,7 +72,7 @@ class RealEstateAd(BaseModel):
     additional_notes: Optional[str] = None
     
     # Processing status
-    processing_status: str = Field(default="pending", description="pending, processing, completed, failed")
+    processing_status: RealEstateAdStatus = Field(default=RealEstateAdStatus.PENDING)
     llm_processed: bool = False  # Whether LLM processing is complete
     llm_cost: Optional[float] = None  # Cost of LLM processing in USD
     
@@ -75,6 +85,19 @@ class RealEstateAd(BaseModel):
     
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    
+    @validator('id', pre=True)
+    def convert_objectid_to_str(cls, v):
+        """Convert MongoDB ObjectId to string"""
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        populate_by_name = True  # Allow using both 'id' and '_id'
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class ForwardedPost(BaseModel):

@@ -5,6 +5,7 @@ Model for outgoing posts that we send to users/channels
 from datetime import datetime, UTC
 from typing import Optional
 from pydantic import BaseModel, Field
+from app.models.status_enums import OutgoingPostStatus
 
 
 class OutgoingPost(BaseModel):
@@ -24,7 +25,7 @@ class OutgoingPost(BaseModel):
     sent_to_type: str = Field(default="user", description="user or channel")
     
     # Status
-    status: str = Field(default="pending", description="pending, sent, failed")
+    status: OutgoingPostStatus = Field(default=OutgoingPostStatus.PENDING)
     error_message: Optional[str] = None
     
     # Link to source

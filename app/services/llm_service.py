@@ -12,14 +12,17 @@ import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+import asyncio
 import httpx
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic, RateLimitError as AnthropicRateLimitError
+from openai import AsyncOpenAI, RateLimitError as OpenAIRateLimitError, APIError as OpenAIAPIError
 
 from app.core.config import settings
 from app.db.mongodb import mongodb
+from app.exceptions import LLMQuotaExceededError
 from app.models.llm_cost import LLMCost
 from app.models.telegram import PropertyType, RealEstateAd, RentalType
+from app.services.admin_notification_service import admin_notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +73,7 @@ class LLMService:
             # Create parsing prompt
             prompt = self._create_parsing_prompt(text)
 
-            # Call LLM
+            # Call LLM (may raise exception for quota errors)
             llm_result = await self._call_llm(prompt)
             if not llm_result:
                 return None
@@ -109,7 +112,21 @@ class LLMService:
 
             return ad
 
-        except Exception as e:  # type: ignore
+        except (OpenAIRateLimitError, AnthropicRateLimitError) as e:
+            # LLM quota/rate limit exceeded (both providers)
+            provider = "openai" if isinstance(e, OpenAIRateLimitError) else "anthropic"
+            logger.error("LLM quota exceeded while parsing message %s (provider: %s): %s", post_id, provider, e)
+            
+            # Notify super admins
+            try:
+                asyncio.create_task(admin_notification_service.notify_quota_exceeded(str(e)))
+            except Exception as notify_error:
+                logger.error("Error creating notification task: %s", notify_error)
+            
+            # Raise custom exception to be handled by caller
+            raise LLMQuotaExceededError(str(e), provider=provider, original_error=e)
+        except (OpenAIAPIError, Exception) as e:
+            # Other errors (API errors, parsing errors, etc.)
             logger.error("Error parsing with LLM: %s", e)
             return None
 
@@ -119,11 +136,18 @@ class LLMService:
 Extract structured information into JSON format.
 
 INSTRUCTIONS:
-1. Analyze if message is genuine real estate listing
-2. Extract all available parameters using context clues
-3. Handle language variations and informal writing
-4. Use null for missing data, don't guess
-5. Return confidence score based on extraction certainty
+1. Analyze if message is genuine real estate listing OFFERING property for rent/sale
+2. Messages about SEARCHING for property should be marked as is_real_estate: false
+3. Extract all available parameters using context clues
+4. Handle language variations and informal writing
+5. Use null for missing data, don't guess
+6. Return confidence score based on extraction certainty
+
+IMPORTANT CLASSIFICATION RULES:
+- OFFER messages: "сдаю", "сдам", "продаю", "предлагаю", "сдается", "продается" = REAL ESTATE
+- SEARCH messages: "ищу", "сниму", "нужна", "требуется", "ищем", "нужен" = NOT REAL ESTATE
+- If message is about finding/buying/renting property, mark is_real_estate: false
+- Only messages offering property for rent/sale should be marked as real estate
 
 RUSSIAN TERMS:
 Rent: сдаю, сдам, сдается, аренда, снять, в аренду
@@ -134,7 +158,7 @@ Room: комната, ком, комнату
 House: дом, коттедж, таунхаус
 Studio: студия, однушка
 Commercial: офис, магазин, склад
-Room counts: 1к, 1-к, однокомнатная, однушка, 2к, 2-к, двухкомнатная, двушка, 3к, трешка, 4к
+Room counts: 1к, 1-к, однокомнатная, однушка, студия, 2к, 2-к, двухкомнатная, двушка, 3к, трешка, 4к
 Floor info: X/Y этаж, X/Y этаж, на X этаже, X-й этаж (X = current floor, Y = total floors)
 Long-term: долгосрочно, долгосрок, на длительный срок
 Short-term: посуточно, на сутки, краткосрок, суточно
@@ -142,8 +166,10 @@ Short-term: посуточно, на сутки, краткосрок, суто�
 IMPORTANT:
 - "3/8 этаж" means floor 3 of 8 total floors, NOT 3 rooms
 - "X/Y этаж" format is ALWAYS about floors, never rooms
-- Only count rooms when explicitly mentioned: "2к", "двушка", "3 комнаты", etc.
+- STUDIO APARTMENTS: "студия", "квартира-студия", "однушка" ALWAYS means 1 room
+- Count rooms when explicitly mentioned: "2к", "двушка", "3 комнаты", "студия", etc.
 - If only floor info is given without room count, set rooms_count to null
+- Studio apartments are 1-room apartments, not separate room type
 
 JSON STRUCTURE:
 {{
@@ -269,6 +295,68 @@ Output:
   "additional_notes": null
 }}
 
+Example 4 (Studio apartment - 1 room):
+Input: "Сдается квартира-студия в новом апартаментном комплексе в Арабкире. Адрес: улица Керу 17. Цена: 170 000 ֏ в месяц (плюс коммунальные услуги). Площадь: 25 кв. м."
+Output:
+{{
+  "is_real_estate": true,
+  "parsing_confidence": 0.95,
+  "property_type": "apartment",
+  "rental_type": "long_term",
+  "rooms_count": 1,
+  "area_sqm": 25,
+  "price": 170000,
+  "currency": "AMD",
+  "district": "Арабкир",
+  "address": "улица Керу 17",
+  "contacts": null,
+  "has_balcony": null,
+  "has_air_conditioning": null,
+  "has_internet": null,
+  "has_furniture": null,
+  "has_parking": null,
+  "has_garden": null,
+  "has_pool": null,
+  "has_elevator": null,
+  "pets_allowed": null,
+  "utilities_included": false,
+  "floor": null,
+  "total_floors": null,
+  "city": "Ереван",
+  "additional_notes": "Studio apartment is treated as 1-room apartment"
+}}
+
+Example 5 (SEARCH message - should be false):
+Input: "Здравствуйте. Ищем квартиру, бюджет до 150 000. Для молодой пары. Хорошая транспортная развязка. Желательно Ереван, но можно Абовян. По возможности без предоплаты и комиссий."
+Output:
+{{
+  "is_real_estate": false,
+  "parsing_confidence": 0.0,
+  "property_type": null,
+  "rental_type": null,
+  "rooms_count": null,
+  "area_sqm": null,
+  "price": null,
+  "currency": null,
+  "city": null,
+  "district": null,
+  "address": null,
+  "contacts": null,
+  "has_balcony": null,
+  "has_air_conditioning": null,
+  "has_internet": null,
+  "has_furniture": null,
+  "has_parking": null,
+  "has_garden": null,
+  "has_pool": null,
+  "has_elevator": null,
+  "pets_allowed": null,
+  "utilities_included": null,
+  "floor": null,
+  "total_floors": null,
+  "additional_notes": "This is a search request, not an offer. Person is looking for an apartment to rent."
+}}
+
 EXTRACTION RULES:
 - If information is not available, use null
 - For boolean fields, use true/false
@@ -306,98 +394,86 @@ Analyze this real estate text and return JSON:
 {text}"""
 
     async def _call_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """Call LLM API based on provider"""
-        try:
-            if self.provider == "openai":
-                return await self._call_openai(prompt)
-            if self.provider == "anthropic":
-                return await self._call_anthropic(prompt)
-            if self.provider == "local":
-                return await self._call_local(prompt)
-            if self.provider == "mock":
-                return await self._call_mock(prompt)
-            logger.error("Unknown LLM provider: %s", self.provider)
-            return None
-        except Exception as e:
-            logger.error("Error calling LLM: %s", e)
-            return None
+        """Call LLM API based on provider - may raise RateLimitError"""
+        if self.provider == "openai":
+            return await self._call_openai(prompt)
+        if self.provider == "anthropic":
+            return await self._call_anthropic(prompt)
+        if self.provider == "local":
+            return await self._call_local(prompt)
+        if self.provider == "mock":
+            return await self._call_mock(prompt)
+        logger.error("Unknown LLM provider: %s", self.provider)
+        return None
 
     async def _call_openai(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """Call OpenAI API"""
-        try:
-            if not self.client or not hasattr(self.client, "chat"):
-                logger.error("OpenAI client not properly initialized")
-                return None
-
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert at analyzing real estate advertisements "
-                        "in Armenian and Russian languages.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-            )
-
-            content = response.choices[0].message.content
-            usage = response.usage
-
-            if not usage:
-                logger.error("No usage information in OpenAI response")
-                return None
-
-            return {
-                "response": content,
-                "cost_info": {
-                    "prompt_tokens": usage.prompt_tokens,
-                    "completion_tokens": usage.completion_tokens,
-                    "total_tokens": usage.total_tokens,
-                    "cost_usd": self._calculate_cost(usage.prompt_tokens, usage.completion_tokens),
-                    "model_name": self.model,
-                },
-            }
-        except Exception as e:
-            logger.error("Error calling OpenAI: %s", e)
+        """Call OpenAI API - raises exceptions on errors"""
+        if not self.client or not hasattr(self.client, "chat"):
+            logger.error("OpenAI client not properly initialized")
             return None
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert at analyzing real estate advertisements "
+                    "in Armenian and Russian languages.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+        )
+
+        content = response.choices[0].message.content
+        usage = response.usage
+
+        if not usage:
+            logger.error("No usage information in OpenAI response")
+            return None
+
+        return {
+            "response": content,
+            "cost_info": {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+                "cost_usd": self._calculate_cost(usage.prompt_tokens, usage.completion_tokens),
+                "model_name": self.model,
+            },
+        }
 
     async def _call_anthropic(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """Call Anthropic API"""
-        try:
-            if not self.client or not hasattr(self.client, "messages"):
-                logger.error("Anthropic client not properly initialized")
-                return None
-
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            content = response.content[0].text
-            usage = response.usage
-
-            if not usage:
-                logger.error("No usage information in Anthropic response")
-                return None
-
-            return {
-                "response": content,
-                "cost_info": {
-                    "prompt_tokens": usage.input_tokens,
-                    "completion_tokens": usage.output_tokens,
-                    "total_tokens": usage.input_tokens + usage.output_tokens,
-                    "cost_usd": self._calculate_cost(usage.input_tokens, usage.output_tokens),
-                    "model_name": self.model,
-                },
-            }
-        except Exception as e:
-            logger.error("Error calling Anthropic: %s", e)
+        """Call Anthropic API - raises exceptions on errors"""
+        if not self.client or not hasattr(self.client, "messages"):
+            logger.error("Anthropic client not properly initialized")
             return None
+
+        response = await self.client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        content = response.content[0].text
+        usage = response.usage
+
+        if not usage:
+            logger.error("No usage information in Anthropic response")
+            return None
+
+        return {
+            "response": content,
+            "cost_info": {
+                "prompt_tokens": usage.input_tokens,
+                "completion_tokens": usage.output_tokens,
+                "total_tokens": usage.input_tokens + usage.output_tokens,
+                "cost_usd": self._calculate_cost(usage.input_tokens, usage.output_tokens),
+                "model_name": self.model,
+            },
+        }
 
     async def _call_local(self, prompt: str) -> Optional[Dict[str, Any]]:
         """Call local LLM API (Ollama, etc.)"""
@@ -477,129 +553,165 @@ Analyze this real estate text and return JSON:
                 ensure_ascii=False,
             )
         else:
-            # Check for real estate context
-            real_estate_indicators = [
-                "сдаю",
-                "сдаётся",
-                "сдается",
-                "сдам",
-                "сдаём",
-                "аренд",
-                "аренда",
-                "аренду",
-                "предлагаю",
-                "предлагаем",
-                "предлагает",
-                "предложение",
-                "квартир",
-                "дом",
-                "комнат",
-                "жилье",
-                "недвижимость",
-                "апартамент",
-                "кв.м",
-                "кв м",
-                "квадрат",
-                "площадь",
-                "этаж",
-                "этажей",
-                "подъезд",
-                "балкон",
-                "лоджия",
-                "кухня",
-                "ванная",
-                "туалет",
-                "коридор",
-                "мебель",
-                "меблирован",
-                "ремонт",
-                "новостройка",
-                "современный",
-                "цена",
-                "стоимость",
-                "драм",
-                "доллар",
-                "usd",
-                "$",
-                "₽",
-                "руб",
-                "свяжитесь",
-                "пишите",
-                "звоните",
-                "телефон",
-                "контакт",
-                "ереван",
-                "центр",
-                "кентрон",
-                "арабкир",
-                "малатия",
-                "эребуни",
-                "шахумян",
-                "канакер",
-                "аван",
-                "нор-норк",
-                "шенгавит",
+            # Check for search messages (people looking for property)
+            search_indicators = [
+                "ищу",
+                "ищем",
+                "сниму",
+                "нужна",
+                "нужен",
+                "требуется",
+                "ищется",
+                "ищут",
+                "нужны",
+                "требуются",
+                "разыскиваю",
+                "разыскиваем",
+                "ищу квартиру",
+                "ищу дом",
+                "ищу комнату",
+                "нужна квартира",
+                "нужен дом",
+                "нужна комната",
+                "требуется квартира",
+                "требуется дом",
+                "требуется комната",
             ]
 
-            indicator_count = sum(1 for indicator in real_estate_indicators if indicator in text_lower)
+            is_search_message = any(indicator in text_lower for indicator in search_indicators)
 
-            # Check for price patterns
-            price_patterns = [
-                r"\d+\s*000?\s*драм",
-                r"\d+\s*000?\s*₽",
-                r"\$\d+",
-                r"\d+\s*доллар",
-                r"\d+\s*usd",
-                r"\d+\s*к\s*драм",
-            ]
-            has_price = any(re.search(pattern, text_lower) for pattern in price_patterns)
-
-            # Check for numeric values
-            has_numbers = bool(re.search(r"\d+", text))
-
-            # Determine if it's real estate
-            is_real_estate = (
-                indicator_count >= 1
-                or (has_price and has_numbers)
-                or (has_numbers and "квартир" in text_lower)
-                or (has_numbers and "комнат" in text_lower)
-                or (has_numbers and "дом" in text_lower)
-                or ("сдаётся" in text_lower)
-                or ("сдается" in text_lower)
-                or ("сдаю" in text_lower)
-                or ("сдам" in text_lower)
-                or ("сдаём" in text_lower)
-            )
-
-            if is_real_estate:
-                # Simulate real estate ad parsing
+            if is_search_message:
                 response = json.dumps(
                     {
-                        "is_real_estate": True,
-                        "property_type": "apartment",
-                        "rental_type": "long_term",
-                        "rooms_count": 3,
-                        "area_sqm": 75.0,
-                        "price": 300000,
-                        "currency": "AMD",
-                        "district": "Центр",
-                        "address": "ул. Амиряна 13",
-                        "contacts": ["+374123456789"],
-                        "has_balcony": True,
-                        "has_air_conditioning": True,
-                        "has_internet": True,
-                        "has_furniture": False,
-                        "has_parking": False,
-                        "has_garden": False,
-                        "has_pool": False,
-                        "parsing_confidence": 0.85,
+                        "is_real_estate": False,
+                        "reason": "This is a search request, not an offer. Person is looking for property to rent/buy."
                     },
                     ensure_ascii=False,
                 )
             else:
-                response = json.dumps(
-                    {"is_real_estate": False, "reason": "No real estate context found"}, ensure_ascii=False
+                # Check for real estate context (offers)
+                real_estate_indicators = [
+                    "сдаю",
+                    "сдаётся",
+                    "сдается",
+                    "сдам",
+                    "сдаём",
+                    "аренд",
+                    "аренда",
+                    "аренду",
+                    "предлагаю",
+                    "предлагаем",
+                    "предлагает",
+                    "предложение",
+                    "квартир",
+                    "дом",
+                    "комнат",
+                    "жилье",
+                    "недвижимость",
+                    "апартамент",
+                    "кв.м",
+                    "кв м",
+                    "квадрат",
+                    "площадь",
+                    "этаж",
+                    "этажей",
+                    "подъезд",
+                    "балкон",
+                    "лоджия",
+                    "кухня",
+                    "ванная",
+                    "туалет",
+                    "коридор",
+                    "мебель",
+                    "меблирован",
+                    "ремонт",
+                    "новостройка",
+                    "современный",
+                    "цена",
+                    "стоимость",
+                    "драм",
+                    "доллар",
+                    "usd",
+                    "$",
+                    "₽",
+                    "руб",
+                    "свяжитесь",
+                    "пишите",
+                    "звоните",
+                    "телефон",
+                    "контакт",
+                    "ереван",
+                    "центр",
+                    "кентрон",
+                    "арабкир",
+                    "малатия",
+                    "эребуни",
+                    "шахумян",
+                    "канакер",
+                    "аван",
+                    "нор-норк",
+                    "шенгавит",
+                ]
+
+                indicator_count = sum(1 for indicator in real_estate_indicators if indicator in text_lower)
+
+                # Check for price patterns
+                price_patterns = [
+                    r"\d+\s*000?\s*драм",
+                    r"\d+\s*000?\s*₽",
+                    r"\$\d+",
+                    r"\d+\s*доллар",
+                    r"\d+\s*usd",
+                    r"\d+\s*к\s*драм",
+                ]
+                has_price = any(re.search(pattern, text_lower) for pattern in price_patterns)
+
+                # Check for numeric values
+                has_numbers = bool(re.search(r"\d+", text))
+
+                # Determine if it's real estate offer
+                is_real_estate_offer = (
+                    indicator_count >= 1
+                    or (has_price and has_numbers)
+                    or (has_numbers and "квартир" in text_lower)
+                    or (has_numbers and "комнат" in text_lower)
+                    or (has_numbers and "дом" in text_lower)
+                    or ("сдаётся" in text_lower)
+                    or ("сдается" in text_lower)
+                    or ("сдаю" in text_lower)
+                    or ("сдам" in text_lower)
+                    or ("сдаём" in text_lower)
                 )
+
+                if is_real_estate_offer:
+                    # Simulate real estate ad parsing
+                    response = json.dumps(
+                        {
+                            "is_real_estate": True,
+                            "property_type": "apartment",
+                            "rental_type": "long_term",
+                            "rooms_count": 3,
+                            "area_sqm": 75.0,
+                            "price": 300000,
+                            "currency": "AMD",
+                            "district": "Центр",
+                            "address": "ул. Амиряна 13",
+                            "contacts": ["+374123456789"],
+                            "has_balcony": True,
+                            "has_air_conditioning": True,
+                            "has_internet": True,
+                            "has_furniture": False,
+                            "has_parking": False,
+                            "has_garden": False,
+                            "has_pool": False,
+                            "parsing_confidence": 0.85,
+                        },
+                        ensure_ascii=False,
+                    )
+                else:
+                    response = json.dumps(
+                        {"is_real_estate": False, "reason": "No real estate context found"}, ensure_ascii=False
+                    )
 
         # Simulate token usage
         prompt_tokens = len(prompt.split()) * 1.3

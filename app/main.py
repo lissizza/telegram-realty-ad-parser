@@ -49,6 +49,11 @@ async def lifespan(app: FastAPI):
     # Update global instance with notification service
     global_telegram_service = get_telegram_service()
     global_telegram_service.set_notification_service(telegram_bot)
+    
+    # Initialize admin notification service
+    from app.services.admin_notification_service import admin_notification_service
+    from app.services.notification_service import TelegramNotificationService
+    admin_notification_service.set_notification_service(TelegramNotificationService(telegram_bot))
     bot_task = None
     parsing_task = None
 

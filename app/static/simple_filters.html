@@ -1361,47 +1361,90 @@
             try {
                 console.log('Saving price filters for filter:', filterId);
                 
-                // First, delete existing price filters
+                // Get existing price filters
                 const existingResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/filters/${filterId}/price-filters`);
-                if (existingResponse.ok) {
-                    const existingFilters = await existingResponse.json();
-                    console.log('Found existing price filters:', existingFilters.length);
+                if (!existingResponse.ok) {
+                    throw new Error('Failed to fetch existing price filters');
+                }
+                
+                const existingFilters = await existingResponse.json();
+                console.log('Found existing price filters:', existingFilters.length);
+                
+                // Get new price filters from form
+                const newPriceFilters = getPriceFiltersFromForm();
+                console.log('New price filters from form:', newPriceFilters.length);
+                
+                // Create maps for easier lookup
+                const existingByCurrency = {};
+                existingFilters.forEach(pf => {
+                    existingByCurrency[pf.currency] = pf;
+                });
+                
+                const newByCurrency = {};
+                newPriceFilters.forEach(pf => {
+                    newByCurrency[pf.currency] = pf;
+                });
+                
+                // Process each currency
+                const allCurrencies = new Set([...Object.keys(existingByCurrency), ...Object.keys(newByCurrency)]);
+                
+                for (const currency of allCurrencies) {
+                    const existing = existingByCurrency[currency];
+                    const newFilter = newByCurrency[currency];
                     
-                    for (const pf of existingFilters) {
-                        console.log('Deleting price filter:', pf.id);
-                        const deleteResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters/${pf.id}`, {
+                    if (existing && newFilter) {
+                        // Update existing filter
+                        console.log(`Updating existing ${currency} price filter:`, existing.id);
+                        const updateResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters/${existing.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                min_price: newFilter.min_price,
+                                max_price: newFilter.max_price,
+                                currency: newFilter.currency,
+                                is_active: true
+                            })
+                        });
+                        
+                        if (!updateResponse.ok) {
+                            console.error(`Failed to update ${currency} price filter:`, existing.id);
+                        }
+                    } else if (existing && !newFilter) {
+                        // Delete existing filter (no longer needed)
+                        console.log(`Deleting ${currency} price filter:`, existing.id);
+                        const deleteResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters/${existing.id}`, {
                             method: 'DELETE'
                         });
+                        
                         if (!deleteResponse.ok) {
-                            console.error('Failed to delete price filter:', pf.id);
+                            console.error(`Failed to delete ${currency} price filter:`, existing.id);
+                        }
+                    } else if (!existing && newFilter) {
+                        // Create new filter
+                        console.log(`Creating new ${currency} price filter`);
+                        const createResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                filter_id: filterId,
+                                min_price: newFilter.min_price,
+                                max_price: newFilter.max_price,
+                                currency: newFilter.currency,
+                                is_active: true
+                            })
+                        });
+                        
+                        if (!createResponse.ok) {
+                            console.error(`Failed to create ${currency} price filter`);
                         }
                     }
                 }
-
-                // Then create new ones
-                const priceFilters = getPriceFiltersFromForm();
-                console.log('Creating new price filters:', priceFilters.length);
                 
-                for (const pf of priceFilters) {
-                    console.log('Creating price filter:', pf);
-                    const createResponse = await fetch(`${API_BASE.replace('/simple-filters', '/price-filters')}/price-filters`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            filter_id: filterId,
-                            min_price: pf.min_price,
-                            max_price: pf.max_price,
-                            currency: pf.currency,
-                            is_active: true
-                        })
-                    });
-                    
-                    if (!createResponse.ok) {
-                        console.error('Failed to create price filter:', pf);
-                    }
-                }
+                console.log('Price filters saved successfully');
             } catch (error) {
                 console.error('Error saving price filters:', error);
             }

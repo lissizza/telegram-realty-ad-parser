@@ -271,7 +271,7 @@
 
     <script>
         // Use current origin + API path
-        const API_BASE = window.location.origin + '/api/v1/user-channel-subscriptions';
+        const API_BASE = window.location.origin + '/api/v1/monitored-channels';
 
         // Get user ID from Telegram WebApp
         let currentUserId = null;
@@ -340,15 +340,59 @@
             }
         }
         
+        // Fallback: if currentUserId is still null, try to get from URL
+        if (!currentUserId) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const userIdFromUrl = urlParams.get('user_id');
+            if (userIdFromUrl) {
+                currentUserId = parseInt(userIdFromUrl);
+                console.log('Using user_id from URL as fallback:', currentUserId);
+            }
+        }
+        
+        // Final fallback: if still no user ID, show error
+        if (!currentUserId) {
+            console.error('Could not determine user ID from any source');
+            document.addEventListener('DOMContentLoaded', function() {
+                const subscriptionsList = document.getElementById('subscriptionsList');
+                if (subscriptionsList) {
+                    subscriptionsList.innerHTML = `
+                        <div class="error">
+                            <h3>Ошибка авторизации</h3>
+                            <p>Не удалось определить ID пользователя. Попробуйте открыть страницу через бота.</p>
+                        </div>
+                    `;
+                }
+            });
+        }
+        
         console.log('Final currentUserId:', currentUserId);
         console.log('API_BASE:', API_BASE);
 
         // Load subscriptions on page load
-        document.addEventListener('DOMContentLoaded', loadSubscriptions);
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('DOM loaded, currentUserId:', currentUserId);
+            // Сначала проверяем права и скрываем элементы
+            await checkAndHideAdminFeatures();
+            // Затем загружаем подписки
+            await loadSubscriptions();
+        });
 
         async function loadSubscriptions() {
             try {
+                console.log('loadSubscriptions called, currentUserId:', currentUserId);
                 const subscriptionsList = document.getElementById('subscriptionsList');
+                
+                // Проверяем, что currentUserId определен
+                if (!currentUserId) {
+                    subscriptionsList.innerHTML = `
+                        <div class="error">
+                            <h3>Ошибка авторизации</h3>
+                            <p>Не удалось определить ID пользователя. Попробуйте перезагрузить страницу.</p>
+                        </div>
+                    `;
+                    return;
+                }
                 
                 // Показываем индикатор загрузки только если список пустой или показывает ошибку
                 if (subscriptionsList.innerHTML.includes('Загрузка') || subscriptionsList.innerHTML.includes('Ошибка')) {
@@ -356,7 +400,7 @@
                 }
                 
                 const url = `${API_BASE}/?user_id=${currentUserId}`;
-                console.log('Loading subscriptions from URL:', url);
+                console.log('Loading monitored channels from URL:', url);
                 
                 const response = await fetch(url);
                 console.log('Response status:', response.status);
@@ -366,10 +410,10 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                const subscriptions = await response.json();
-                console.log('Loaded subscriptions:', subscriptions);
+                const channels = await response.json();
+                console.log('Loaded monitored channels:', channels);
                 
-                renderSubscriptions(subscriptions);
+                renderSubscriptions(channels);
                 
             } catch (error) {
                 console.error('Error loading subscriptions:', error);
@@ -385,31 +429,31 @@
             }
         }
 
-        function renderSubscriptions(subscriptions) {
+        function renderSubscriptions(channels) {
             const subscriptionsList = document.getElementById('subscriptionsList');
             
-            if (subscriptions.length === 0) {
-                subscriptionsList.innerHTML = '<p>У вас пока нет подписок на каналы.</p>';
+            if (channels.length === 0) {
+                subscriptionsList.innerHTML = '<p>Нет отслеживаемых каналов.</p>';
                 return;
             }
 
-            const html = subscriptions.map(subscription => `
+            const html = channels.map(channel => `
                 <div class="subscription-item">
                     <div class="subscription-info">
                         <h3>
-                            <span class="status-indicator ${subscription.is_active ? 'status-active' : 'status-inactive'}"></span>
-                            ${subscription.channel_title || subscription.channel_username}
+                            <span class="status-indicator ${channel.is_active ? 'status-active' : 'status-inactive'}"></span>
+                            ${channel.channel_title || channel.channel_username}
                         </h3>
-                        <p><strong>Канал:</strong> ${subscription.channel_username}</p>
-                        ${subscription.topic_id ? `<p><strong>Топик:</strong> ${subscription.topic_title || subscription.topic_id}</p>` : ''}
-                        <p><strong>Статус:</strong> ${subscription.is_active ? 'Активен' : 'Неактивен'}</p>
-                        ${subscription.channel_link ? `<p><strong>Ссылка:</strong> <a href="${subscription.topic_id ? subscription.channel_link + '/' + subscription.topic_id : subscription.channel_link}" target="_blank">${subscription.topic_id ? subscription.channel_link + '/' + subscription.topic_id : subscription.channel_link}</a></p>` : ''}
+                        <p><strong>Канал:</strong> ${channel.channel_username}</p>
+                        ${channel.topic_id ? `<p><strong>Топик:</strong> ${channel.topic_title || channel.topic_id}</p>` : ''}
+                        <p><strong>Статус:</strong> ${channel.is_active ? 'Активен' : 'Неактивен'}</p>
+                        ${channel.channel_link ? `<p><strong>Ссылка:</strong> <a href="${channel.topic_id ? channel.channel_link + '/' + channel.topic_id : channel.channel_link}" target="_blank">${channel.topic_id ? channel.channel_link + '/' + channel.topic_id : channel.channel_link}</a></p>` : ''}
                     </div>
                     <div class="subscription-actions">
-                        <button class="btn btn-small btn-secondary" onclick="toggleSubscription('${subscription.id}', ${subscription.is_active})">
-                            ${subscription.is_active ? 'Деактивировать' : 'Активировать'}
+                        <button class="btn btn-small btn-secondary" onclick="toggleChannel('${channel.id}', ${channel.is_active})">
+                            ${channel.is_active ? 'Деактивировать' : 'Активировать'}
                         </button>
-                        <button class="btn btn-small btn-danger" onclick="deleteSubscription('${subscription.id}')">
+                        <button class="btn btn-small btn-danger" onclick="deleteChannel('${channel.id}')">
                             Удалить
                         </button>
                     </div>
@@ -419,7 +463,99 @@
             subscriptionsList.innerHTML = html;
         }
 
-        function showAddChannelForm() {
+        async function checkAdminRights() {
+            try {
+                console.log('Checking admin rights for user_id:', currentUserId);
+                const response = await fetch(`${window.location.origin}/api/v1/admin/check-rights?user_id=${currentUserId}`);
+                const data = await response.json();
+                console.log('Admin rights response:', data);
+                return data.is_admin || false;
+            } catch (error) {
+                console.error('Error checking admin rights:', error);
+                return false;
+            }
+        }
+
+        // Define UI elements for different roles
+        const ROLE_UI_CONFIG = {
+            user: {
+                showElements: ['subscriptionsList'],
+                hideElements: ['addChannelButton'],
+                addMessages: [
+                    {
+                        target: '.section',
+                        message: 'ℹ️ <strong>Только администраторы могут добавлять каналы</strong><br>Обратитесь к администратору для добавления новых каналов.',
+                        position: 'after'
+                    }
+                ]
+            },
+            admin: {
+                showElements: ['subscriptionsList', 'addChannelButton'],
+                hideElements: [],
+                addMessages: []
+            }
+        };
+
+        async function checkAndHideAdminFeatures() {
+            const isAdmin = await checkAdminRights();
+            const role = isAdmin ? 'admin' : 'user';
+            console.log('User role determined:', role, 'isAdmin:', isAdmin);
+            const config = ROLE_UI_CONFIG[role];
+            console.log('UI config for role:', config);
+            
+            // Show/hide elements based on role
+            config.showElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                console.log('Showing element:', elementId, 'element found:', !!element);
+                if (element) {
+                    element.style.display = 'block';
+                }
+            });
+            
+            config.hideElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                console.log('Hiding element:', elementId, 'element found:', !!element);
+                if (element) {
+                    element.style.display = 'none';
+                }
+            });
+            
+            // Add role-specific messages
+            config.addMessages.forEach(messageConfig => {
+                const target = document.querySelector(messageConfig.target);
+                if (target) {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'role-message';
+                    messageDiv.style.cssText = 'text-align: center; margin: 20px 0; padding: 15px; background: var(--tg-theme-secondary-bg-color, #f8f9fa); border-radius: 8px; color: var(--tg-theme-hint-color, #666666);';
+                    messageDiv.innerHTML = messageConfig.message;
+                    
+                    if (messageConfig.position === 'after') {
+                        target.appendChild(messageDiv);
+                    } else {
+                        target.insertBefore(messageDiv, target.firstChild);
+                    }
+                }
+            });
+        }
+
+        async function showAddChannelForm() {
+            console.log('showAddChannelForm called, currentUserId:', currentUserId);
+            
+            // Проверяем, что currentUserId определен
+            if (!currentUserId) {
+                showNotification('❌ Ошибка авторизации. Не удалось определить ID пользователя.', 'error');
+                return;
+            }
+            
+            // Check if user has admin rights
+            const isAdmin = await checkAdminRights();
+            console.log('showAddChannelForm: isAdmin =', isAdmin);
+            
+            if (!isAdmin) {
+                showNotification('❌ Только администраторы могут добавлять каналы. Обратитесь к администратору для добавления каналов.', 'error');
+                return;
+            }
+            
             document.getElementById('addChannelButton').style.display = 'none';
             document.getElementById('addChannelForm').style.display = 'block';
             document.getElementById('channelInput').focus();
@@ -436,7 +572,16 @@
         }
 
         async function addChannel() {
+            console.log('addChannel called, currentUserId:', currentUserId);
+            
+            // Проверяем, что currentUserId определен
+            if (!currentUserId) {
+                showNotification('❌ Ошибка авторизации. Не удалось определить ID пользователя.', 'error');
+                return;
+            }
+            
             const channelInput = document.getElementById('channelInput').value.trim();
+            console.log('addChannel: channelInput =', channelInput);
             
             if (!channelInput) {
                 showNotification('Введите ссылку на канал или username', 'error');
@@ -450,13 +595,12 @@
             addButton.disabled = true;
 
             try {
-                const response = await fetch(`${API_BASE}/quick-add`, {
+                const response = await fetch(`${API_BASE}/?created_by=${currentUserId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        user_id: currentUserId,
                         channel_input: channelInput
                     })
                 });
@@ -482,12 +626,16 @@
                 // Улучшенные сообщения об ошибках
                 let errorMessage = error.message;
                 
-                if (errorMessage.includes('Nobody is using this username')) {
+                if (errorMessage.includes('Only administrators can add channels')) {
+                    errorMessage = '❌ Только администраторы могут добавлять каналы. Обратитесь к администратору для добавления каналов.';
+                } else if (errorMessage.includes('Nobody is using this username') || errorMessage.includes('Cannot find any entity')) {
                     errorMessage = '❌ Канал не найден. Проверьте правильность названия канала или ссылки.';
                 } else if (errorMessage.includes('У вас уже есть подписка')) {
                     errorMessage = `❌ ${errorMessage}`;
-                } else if (errorMessage.includes('Failed to create subscription')) {
+                } else if (errorMessage.includes('Failed to create subscription') || errorMessage.includes('Failed to create channel')) {
                     errorMessage = '❌ Не удалось добавить канал. Проверьте правильность данных.';
+                } else if (errorMessage.includes('Access denied')) {
+                    errorMessage = '❌ Доступ запрещен. Только администраторы могут добавлять каналы.';
                 } else {
                     errorMessage = `❌ Ошибка: ${errorMessage}`;
                 }
@@ -515,9 +663,9 @@
             }
         }
 
-        async function toggleSubscription(subscriptionId, currentStatus) {
+        async function toggleChannel(channelId, currentStatus) {
             try {
-                const response = await fetch(`${API_BASE}/${subscriptionId}/toggle`, {
+                const response = await fetch(`${API_BASE}/${channelId}/toggle?toggled_by=${currentUserId}`, {
                     method: 'POST'
                 });
 
@@ -525,22 +673,22 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                showMessage('Статус подписки изменен', 'success');
+                showNotification('Статус канала изменен', 'success');
                 loadSubscriptions(); // Reload the list
                 
             } catch (error) {
-                console.error('Error toggling subscription:', error);
-                showMessage(`Ошибка изменения статуса: ${error.message}`, 'error');
+                console.error('Error toggling channel:', error);
+                showNotification(`Ошибка изменения статуса: ${error.message}`, 'error');
             }
         }
 
-        async function deleteSubscription(subscriptionId) {
-            if (!confirm('Вы уверены, что хотите удалить эту подписку?')) {
+        async function deleteChannel(channelId) {
+            if (!confirm('Вы уверены, что хотите удалить этот канал?')) {
                 return;
             }
 
             try {
-                const response = await fetch(`${API_BASE}/${subscriptionId}`, {
+                const response = await fetch(`${API_BASE}/${channelId}?deleted_by=${currentUserId}`, {
                     method: 'DELETE'
                 });
 
@@ -548,12 +696,12 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                showMessage('Подписка удалена', 'success');
+                showNotification('Канал удален', 'success');
                 loadSubscriptions(); // Reload the list
                 
             } catch (error) {
-                console.error('Error deleting subscription:', error);
-                showMessage(`Ошибка удаления: ${error.message}`, 'error');
+                console.error('Error deleting channel:', error);
+                showNotification(`Ошибка удаления: ${error.message}`, 'error');
             }
         }
 
@@ -589,6 +737,7 @@
     </script>
 </body>
 </html>
+
 
 
 

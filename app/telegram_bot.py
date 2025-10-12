@@ -30,6 +30,12 @@ from app.db.mongodb import mongodb
 from app.services import get_telegram_service
 from app.services.llm_service import LLMService
 from app.services.user_service import user_service
+from app.bot.admin_commands import (
+    admin_panel, admin_stats, admin_channels, admin_users, 
+    admin_logs, admin_settings, promote_user, demote_user, create_super_admin
+)
+from app.bot.admin_callbacks import handle_admin_callback
+from app.bot.admin_decorators import is_admin
 
 logger = logging.getLogger(__name__)
 
@@ -77,17 +83,20 @@ class TelegramBot:
             ],
             [
                 InlineKeyboardButton(
-                    "📺 Управление каналами",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"),
-                )
+                    "⚙️ Выбор каналов",
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}"),
+                ),
             ],
             [
                 InlineKeyboardButton("🔄 Обработать сообщения", callback_data="reprocess_menu"),
                 InlineKeyboardButton("🎯 Перефильтровать", callback_data="refilter_menu"),
             ],
-            [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
             [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
         ]
+        
+        # Add admin button if user is admin
+        if await is_admin(user_id):
+            keyboard.append([InlineKeyboardButton("🔧 Админка", callback_data="admin_panel")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
@@ -194,6 +203,7 @@ class TelegramBot:
             await update.message.reply_text(stats_text, parse_mode="Markdown")
         elif update.callback_query:
             await update.callback_query.edit_message_text(stats_text, parse_mode="Markdown")
+
 
     async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /test command - test message processing"""
@@ -603,6 +613,11 @@ class TelegramBot:
             update.callback_query,
         )
 
+        # Check if it's an admin callback first
+        if query.data.startswith("admin_"):
+            await handle_admin_callback(update, context)
+            return
+            
         if query.data == "stats":
             await self.stats_command(update, context)
         elif query.data == "help":
@@ -1093,6 +1108,12 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("reprocess", self.reprocess_command))
         self.application.add_handler(CommandHandler("refilter", self.refilter_command))
         self.application.add_handler(CommandHandler("analyze", self.analyze_command))
+        
+        # Admin commands
+        self.application.add_handler(CommandHandler("admin", admin_panel))
+        self.application.add_handler(CommandHandler("promote", promote_user))
+        self.application.add_handler(CommandHandler("demote", demote_user))
+        self.application.add_handler(CommandHandler("create_super_admin", create_super_admin))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
 

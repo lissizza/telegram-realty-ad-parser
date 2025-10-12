@@ -1,6 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pathlib import Path
+
+from app.bot.admin_decorators import is_admin
 
 router = APIRouter()
 
@@ -23,9 +25,21 @@ async def get_simple_filters_page():
     return FileResponse(STATIC_DIR / "simple_filters.html")
 
 @router.get("/channel-subscriptions")
-async def get_channel_subscriptions_page():
-    """Serve the channel subscriptions HTML page"""
+async def get_channel_subscriptions_page(user_id: int = Query(..., description="User ID")):
+    """Serve the channel subscriptions HTML page (admin only)"""
+    # Check if user has admin rights
+    if not await is_admin(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Only administrators can access channel management."
+        )
+    
     return FileResponse(STATIC_DIR / "channel_subscriptions.html")
+
+@router.get("/channel-selection")
+async def get_channel_selection_page():
+    """Serve the channel selection HTML page"""
+    return FileResponse(STATIC_DIR / "channel_selection.html")
 
 @router.get("/")
 async def get_static_files():

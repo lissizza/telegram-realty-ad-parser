@@ -1,13 +1,26 @@
-# Telegram Real Estate Bot
+# Telegram Realty Ad Parser 🏠
 
-A Telegram bot that monitors real estate channels, parses advertisements, and forwards relevant posts based on configurable filters.
+[![Hacktoberfest](https://img.shields.io/badge/Hacktoberfest-2025-orange.svg)](https://hacktoberfest.com/)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-7.0-green.svg)](https://www.mongodb.com/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A Telegram bot that monitors real estate channels, parses advertisements using LLM, and forwards relevant posts based on user-defined filters. The system uses a centralized channel management approach where administrators control which channels are monitored, while users create personal filters to receive relevant advertisements.
+
+## 🎃 Hacktoberfest 2025
+
+This project participates in Hacktoberfest! We welcome contributions from the community. Check out our [Contributing Guide](CONTRIBUTING.md) to get started.
 
 ## Features
 
-- **Real Estate Parsing**: Automatically extracts structured data from real estate advertisements
-- **Smart Filtering**: Configurable filters based on property type, price, location, and more
+- **Real Estate Parsing**: Automatically extracts structured data from real estate advertisements using LLM
+- **Smart Filtering**: User-configurable filters based on property type, price, location, and more
+- **Centralized Channel Management**: Administrators manage monitored channels, users only manage their filters
+- **Role-Based Access Control**: Admin panel with different permission levels
 - **MongoDB Storage**: Stores all posts and parsed data for analysis
 - **REST API**: FastAPI-based API for managing filters and viewing data
+- **Web Interface**: User-friendly web interface for filter and channel management
 - **Docker Support**: Complete containerized setup with Docker Compose
 
 ## Extracted Data
@@ -26,13 +39,32 @@ The bot parses the following information from real estate advertisements:
 
 ## Architecture
 
+The system follows a centralized channel management approach:
+
+### User Roles
+
+- **Users**: Can create and manage personal filters to receive relevant advertisements
+- **Administrators**: Can manage monitored channels, view statistics, and manage users
+- **Super Administrators**: Full system access including admin management
+
+### System Flow
+
+1. **Channel Monitoring**: Administrators add channels to the monitoring list
+2. **Message Processing**: All messages from monitored channels are parsed by LLM
+3. **Filter Application**: Each parsed advertisement is checked against all user filters
+4. **Message Forwarding**: Matching advertisements are forwarded to respective users
+
+### Project Structure
+
 ```
 ├── app/
 │   ├── api/v1/endpoints/     # REST API endpoints
+│   ├── bot/                  # Telegram bot commands and callbacks
 │   ├── core/                 # Configuration and core utilities
 │   ├── db/                   # Database connection and utilities
 │   ├── models/               # Pydantic data models
-│   └── services/             # Business logic services
+│   ├── services/             # Business logic services
+│   └── static/               # Web interface files
 ├── docker-compose.yml        # Docker orchestration
 ├── Dockerfile               # Application container
 └── pyproject.toml          # Python dependencies
@@ -67,10 +99,18 @@ The bot parses the following information from real estate advertisements:
    docker-compose up -d
    ```
 
-4. **Access the API**:
-   - API Documentation: http://localhost:8000/docs
-   - Health Check: http://localhost:8000/health
+4. **Access the system**:
+
+   - API Documentation: http://localhost:8001/docs
+   - Health Check: http://localhost:8001/health
    - MongoDB Express: http://localhost:8081
+   - Web Interface: http://localhost:8001/api/v1/static/simple-filters?user_id=YOUR_USER_ID
+
+5. **Set up admin user**:
+   ```bash
+   # Create super admin (run inside Docker container)
+   docker-compose exec app python app/utils/setup/create_super_admin.py YOUR_TELEGRAM_USER_ID
+   ```
 
 ### Environment Variables
 
@@ -140,45 +180,76 @@ LLM_MODEL=gpt-3.5-turbo
 
 ## API Endpoints
 
-### Filters
+### User Filters (Personal)
 
-- `GET /api/v1/filters/` - List all filters
-- `POST /api/v1/filters/` - Create new filter
-- `GET /api/v1/filters/{id}` - Get specific filter
-- `PUT /api/v1/filters/{id}` - Update filter
-- `DELETE /api/v1/filters/{id}` - Delete filter
+- `GET /api/v1/simple-filters/user/{user_id}` - Get user's filters
+- `POST /api/v1/simple-filters/` - Create new filter
+- `GET /api/v1/simple-filters/{id}` - Get specific filter
+- `PUT /api/v1/simple-filters/{id}` - Update filter
+- `DELETE /api/v1/simple-filters/{id}` - Delete filter
 
-### Posts
+### Price Filters
 
-- `GET /api/v1/posts/` - List posts with pagination
-- `GET /api/v1/posts/{id}` - Get specific post
-- `DELETE /api/v1/posts/{id}` - Delete post
+- `GET /api/v1/price-filters/filter/{filter_id}` - Get price filters for a filter
+- `POST /api/v1/price-filters/` - Create new price filter
+- `PUT /api/v1/price-filters/{id}` - Update price filter
+- `DELETE /api/v1/price-filters/{id}` - Delete price filter
 
-### Channels
+### Monitored Channels (Admin Only)
 
-- `GET /api/v1/channels/` - List monitored channels
-- `POST /api/v1/channels/` - Add new channel
-- `PUT /api/v1/channels/{id}` - Update channel
-- `DELETE /api/v1/channels/{id}` - Remove channel
+- `GET /api/v1/monitored-channels/` - List all monitored channels
+- `POST /api/v1/monitored-channels/` - Add new channel (admin only)
+- `GET /api/v1/monitored-channels/{id}` - Get specific channel
+- `PUT /api/v1/monitored-channels/{id}` - Update channel
+- `DELETE /api/v1/monitored-channels/{id}` - Remove channel
+- `POST /api/v1/monitored-channels/{id}/toggle-active` - Toggle channel status
 
-### Telegram Bot
+### Admin Management
 
-- `POST /api/v1/telegram/start-monitoring` - Start monitoring
-- `POST /api/v1/telegram/stop-monitoring` - Stop monitoring
-- `GET /api/v1/telegram/status` - Get bot status
+- `GET /api/v1/admin/check-rights?user_id={id}` - Check user admin rights
+- `GET /api/v1/admin/users/` - List all admin users
+- `POST /api/v1/admin/users/` - Create admin user
+- `PUT /api/v1/admin/users/{id}` - Update admin user
+
+### Real Estate Ads
+
+- `GET /api/v1/real-estate-ads/` - List parsed advertisements
+- `GET /api/v1/real-estate-ads/{id}` - Get specific advertisement
+- `DELETE /api/v1/real-estate-ads/{id}` - Delete advertisement
+
+### Web Interface
+
+- `GET /api/v1/static/simple-filters?user_id={id}` - Filter management interface
+- `GET /api/v1/static/channel-subscriptions?user_id={id}` - Channel management interface (admin only)
 
 ## Filter Configuration
 
-Filters support the following criteria:
+### Simple Filters
+
+Users can create personal filters with the following criteria:
 
 - **Property Types**: apartment, house, room, hotel_room
 - **Rental Types**: long_term, daily
-- **Price Range**: min/max in AMD or USD
 - **Rooms Count**: min/max number of rooms
 - **Area Range**: min/max square meters
 - **Districts**: List of Yerevan districts
 - **Keywords**: Must contain at least one keyword
 - **Exclude Keywords**: Must not contain any excluded keywords
+- **Features**: Balcony, air conditioning, internet, furniture, etc.
+
+### Price Filters
+
+Each simple filter can have multiple price filters:
+
+- **Price Range**: min/max price in specific currency
+- **Currency**: AMD, USD, or other supported currencies
+- **Multiple Ranges**: Support for multiple price ranges per filter
+
+### Filter Logic
+
+- **AND Logic**: All specified criteria must match
+- **OR Logic**: For price filters (if any price filter matches, the filter matches)
+- **Null Values**: Null values mean "don't care" (no restriction)
 
 ## Development
 
@@ -214,15 +285,58 @@ poetry run black .
 poetry run isort .
 ```
 
+## User Roles and Permissions
+
+### User Roles
+
+- **USER**: Can create and manage personal filters, view their forwarded messages
+- **MODERATOR**: Can manage channels, view statistics, view logs
+- **ADMIN**: Can manage users, channels, view statistics, manage settings
+- **SUPER_ADMIN**: Full system access including admin management
+
+### Permissions
+
+- **MANAGE_CHANNELS**: Add, remove, and manage monitored channels
+- **MANAGE_USERS**: Promote/demote users, manage user accounts
+- **VIEW_STATS**: Access system statistics and analytics
+- **VIEW_LOGS**: View system logs and monitoring data
+- **MANAGE_ADMINS**: Create and manage admin users
+- **MANAGE_SETTINGS**: Modify system settings and configuration
+
 ## Database Schema
 
 ### Collections
 
-- **posts**: Original Telegram posts
-- **real_estate_ads**: Parsed real estate advertisements
-- **filters**: User-defined filtering rules
-- **forwarded_posts**: Records of forwarded posts
-- **channels**: Monitored Telegram channels
+- **incoming_messages**: Original Telegram messages from monitored channels
+- **real_estate_ads**: Parsed real estate advertisements with structured data
+- **simple_filters**: User-defined filtering rules for advertisements
+- **price_filters**: Price range filters associated with simple filters
+- **outgoing_posts**: Records of forwarded posts to users
+- **monitored_channels**: Channels monitored by the system (admin-managed)
+- **admin_users**: Admin users with roles and permissions
+- **user_filter_matches**: Records of filter matches for analytics
+- **llm_costs**: LLM API usage tracking and costs
+
+## Usage Guide
+
+### For Regular Users
+
+1. **Start the bot**: Send `/start` to the Telegram bot
+2. **Create filters**: Use the "⚙️ Настроить фильтры" button to access the web interface
+3. **View channels**: Use "📺 Список каналов" to see monitored channels
+4. **Check statistics**: Use "📊 Статистика" to view your filter performance
+
+### For Administrators
+
+1. **Access admin panel**: Use "🔧 Админка" button in the bot
+2. **Manage channels**: Use "📺 Управление каналами" to add/remove channels
+3. **Manage users**: Use "👥 Управление пользователями" to promote/demote users
+4. **View statistics**: Use "📊 Статистика" to see system-wide analytics
+
+### Web Interface
+
+- **Filter Management**: `http://localhost:8001/api/v1/static/simple-filters?user_id=YOUR_USER_ID`
+- **Channel Management**: `http://localhost:8001/api/v1/static/channel-subscriptions?user_id=YOUR_USER_ID` (admin only)
 
 ## Contributing
 

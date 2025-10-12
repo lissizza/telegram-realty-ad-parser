@@ -100,17 +100,12 @@ class SimpleFilterService:
                     price_filters = await self.price_filter_service.get_price_filters_by_filter_id(str(filter_obj.id))
                 
                 # Check if filter matches (including price filters)
-                if price_filters:
-                    logger.info("Filter '%s' has %d price filters: %s", filter_obj.name, len(price_filters), 
-                               [(pf.min_price, pf.max_price, pf.currency) for pf in price_filters])
-                    logger.info("Ad price: %s %s", real_estate_ad.price, real_estate_ad.currency)
-                    # Use new method that includes price filter matching
-                    matches = filter_obj.matches_with_price_filters(real_estate_ad, price_filters)
-                    logger.info("Filter '%s' matches after price check: %s", filter_obj.name, matches)
-                else:
-                    logger.info("Filter '%s' has no price filters, using basic matching", filter_obj.name)
-                    # Use old method for filters without price filters
-                    matches = filter_obj.matches(real_estate_ad)
+                logger.info("Filter '%s' has %d price filters: %s", filter_obj.name, len(price_filters),
+                           [(pf.min_price, pf.max_price, pf.currency) for pf in price_filters] if price_filters else [])
+                logger.info("Ad price: %s %s", real_estate_ad.price, real_estate_ad.currency)
+                # Always use matches_with_price_filters method (handles both cases: with and without price filters)
+                matches = filter_obj.matches_with_price_filters(real_estate_ad, price_filters)
+                logger.info("Filter '%s' matches after price check: %s", filter_obj.name, matches)
                 
                 if matches:
                     filter_id = str(filter_obj.id) if filter_obj.id else "unknown"

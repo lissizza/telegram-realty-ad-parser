@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <title>Выбор каналов для мониторинга</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: var(--tg-theme-text-color, #000000);
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .header p {
+            color: var(--tg-theme-hint-color, #999999);
+            font-size: 14px;
+        }
+
+        .admin-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .admin-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: var(--tg-theme-button-color, #007aff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .admin-btn:hover {
+            opacity: 0.9;
+        }
+
+        .admin-btn.danger {
+            background: var(--tg-theme-destructive-text-color, #dc3545);
+        }
+
+        .channel-admin-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .channel-delete-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            background: var(--tg-theme-destructive-text-color, #dc3545);
+            color: white;
+            transition: all 0.2s ease;
+        }
+
+        .channel-delete-btn:hover {
+            opacity: 0.8;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .error {
+            background: var(--tg-theme-destructive-bg-color, #ffebee);
+            color: var(--tg-theme-destructive-text-color, #c62828);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .success {
+            background: var(--tg-theme-success-bg-color, #e8f5e8);
+            color: var(--tg-theme-success-text-color, #2e7d32);
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            text-align: center;
+            display: none;
+            font-size: 14px;
+        }
+
+        .channels-section {
+            margin-bottom: 30px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--tg-theme-text-color, #000000);
+            margin: 0;
+        }
+
+        .select-all-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .select-all-checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--tg-theme-button-color, #007aff);
+        }
+
+        .select-all-checkbox label {
+            font-size: 14px;
+            color: var(--tg-theme-text-color, #000000);
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .channel-item {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            border: 1px solid var(--tg-theme-button-color, #007aff);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .channel-item:hover {
+            background: #e3f2fd;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .channel-item.selected {
+            background: #e8f5e8;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .channel-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .channel-checkbox input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            accent-color: var(--tg-theme-button-color, #007aff);
+        }
+
+        .channel-info {
+            flex: 1;
+        }
+
+        .channel-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .channel-username {
+            color: var(--tg-theme-hint-color, #999999);
+            font-size: 14px;
+        }
+
+        .channel-topic {
+            color: var(--tg-theme-hint-color, #999999);
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .channel-link {
+            color: var(--tg-theme-link-color, #007aff);
+            text-decoration: none;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            transition: all 0.2s ease;
+        }
+
+        .channel-link:hover {
+            text-decoration: none;
+            background: var(--tg-theme-button-color, #007aff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .channel-link::before {
+            content: "🔗";
+            font-size: 10px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--tg-theme-button-color, #007aff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            color: var(--tg-theme-text-color, #000000);
+            border: 1px solid var(--tg-theme-button-color, #007aff);
+        }
+
+        .btn-secondary:hover {
+            background: var(--tg-theme-button-color, #007aff);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .add-channel-button {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .add-channel-form {
+            background: var(--tg-theme-bg-color, #ffffff);
+            border: 1px solid var(--tg-theme-hint-color, #ddd);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 16px;
+            border: 1px solid var(--tg-theme-hint-color, #ddd);
+            border-radius: 8px;
+            font-size: 18px;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            box-sizing: border-box;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color, #007bff);
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .form-actions .btn {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .stats {
+            background: var(--tg-theme-secondary-bg-color, #f8f9fa);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .stats-text {
+            color: var(--tg-theme-hint-color, #999999);
+            font-size: 14px;
+        }
+
+        .stats-number {
+            color: var(--tg-theme-text-color, #000000);
+            font-weight: 600;
+            font-size: 18px;
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 15px;
+            }
+            
+            .header h1 {
+                font-size: 20px;
+            }
+            
+            .channel-item {
+                padding: 12px;
+            }
+            
+            .btn {
+                padding: 12px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 id="pageTitle">📺 Выбор каналов</h1>
+            <p id="pageDescription">Выберите каналы, из которых хотите получать уведомления</p>
+        </div>
+
+        <div class="loading" id="loading">
+            Загрузка каналов...
+        </div>
+
+        <div class="error" id="error" style="display: none;"></div>
+        <div class="success" id="success">Настройки сохранены!</div>
+
+        <div id="content" style="display: none;">
+            <div class="stats">
+                <div class="stats-text">Выбрано каналов:</div>
+                <div class="stats-number" id="selectedCount">0</div>
+            </div>
+
+            <div class="channels-section">
+                <div class="section-header">
+                    <div class="section-title">Доступные каналы</div>
+                    <div class="select-all-checkbox">
+                        <input type="checkbox" id="selectAllCheckbox" onclick="event.preventDefault(); toggleAllChannels()">
+                        <label for="selectAllCheckbox">Выбрать все</label>
+                    </div>
+                </div>
+                <div id="channelsList"></div>
+
+                <!-- Bulk delete button for admin -->
+                <div id="bulkDeleteSection" class="bulk-delete-section" style="display: none; margin-top: 20px; text-align: center;">
+                    <button class="admin-btn danger" onclick="confirmBulkDelete()" style="padding: 12px 24px; font-size: 16px;">
+                        🗑️ Удалить выбранные каналы
+                    </button>
+                </div>
+            </div>
+
+
+        </div>
+    </div>
+
+    <script>
+        // Get user ID from Telegram WebApp
+        let userId = null;
+        console.log('Initializing channel selection page...');
+        console.log('window.Telegram:', window.Telegram);
+        console.log('window.location.search:', window.location.search);
+
+        if (window.Telegram && window.Telegram.WebApp) {
+            console.log('WebApp available:', window.Telegram.WebApp);
+            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
+
+            if (window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+                userId = window.Telegram.WebApp.initDataUnsafe.user.id;
+                console.log('User ID from Telegram:', userId);
+            } else {
+                console.log('No user data in initDataUnsafe');
+            }
+        } else {
+            console.log('Telegram WebApp not available');
+        }
+
+        // Check if admin mode
+        const urlParams = new URLSearchParams(window.location.search);
+        const isAdmin = urlParams.get('admin') === 'true';
+        console.log('Admin mode:', isAdmin);
+
+        // If no user ID from Telegram, try to get from URL params or hash
+        if (!userId) {
+            const userIdFromUrl = urlParams.get('user_id');
+            console.log('User ID from URL (raw):', userIdFromUrl);
+
+            if (userIdFromUrl) {
+                userId = parseInt(userIdFromUrl);
+                console.log('User ID from URL (parsed):', userId);
+            } else {
+                console.log('No user_id in URL params, trying to parse from hash...');
+
+                // Try to parse user data from URL hash (tgWebAppData)
+                const hash = window.location.hash;
+                console.log('URL hash:', hash);
+
+                if (hash.includes('tgWebAppData=')) {
+                    try {
+                        const tgWebAppData = hash.split('tgWebAppData=')[1].split('&')[0];
+                        const decodedData = decodeURIComponent(tgWebAppData);
+                        console.log('Decoded tgWebAppData:', decodedData);
+
+                        // Parse user data from the decoded string
+                        const userMatch = decodedData.match(/user%3D([^&]+)/);
+                        if (userMatch) {
+                            const userDataStr = decodeURIComponent(userMatch[1]);
+                            console.log('User data string:', userDataStr);
+
+                            const userData = JSON.parse(userDataStr);
+                            console.log('Parsed user data:', userData);
+
+                            if (userData.id) {
+                                userId = userData.id;
+                                console.log('User ID from hash:', userId);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error parsing tgWebAppData:', e);
+                    }
+                }
+
+                // Fallback to default if still no user ID
+                if (!userId) {
+                    userId = '223720761'; // Default fallback
+                    console.log('Using default user ID:', userId);
+                }
+            }
+        }
+
+        // Fallback: if currentUserId is still null, try to get from URL
+        if (!userId) {
+            const userIdFromUrl = urlParams.get('user_id');
+            if (userIdFromUrl) {
+                userId = parseInt(userIdFromUrl);
+                console.log('Using user_id from URL as fallback:', userId);
+            }
+        }
+
+        // Final fallback: if still no user ID, show error
+        if (!userId) {
+            console.error('Could not determine user ID from any source');
+            document.addEventListener('DOMContentLoaded', function() {
+                const content = document.getElementById('content');
+                if (content) {
+                    content.innerHTML = `
+                        <div class="error">
+                            <h3>Ошибка авторизации</h3>
+                            <p>Не удалось определить ID пользователя. Попробуйте открыть страницу через бота.</p>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        console.log('Final userId:', userId);
+
+        // Use current origin + API path
+        const API_BASE = window.location.origin + '/api/v1/user-channel-selections';
+
+        let channels = [];
+        let selectedChannels = new Set();
+        let autoSelected = false;
+
+        // Load available channels
+        async function loadChannels() {
+            console.log('loadChannels called with userId:', userId);
+            console.log('API_BASE:', API_BASE);
+
+            let url;
+            if (isAdmin) {
+                // For admin, load all monitored channels
+                url = `${window.location.origin}/api/v1/monitored-channels/?user_id=${userId}`;
+                console.log('Admin mode: loading all monitored channels');
+            } else {
+                // For regular users, load available channels
+                url = `${API_BASE}/user/${userId}/available`;
+            }
+            console.log('Fetching URL:', url);
+
+            try {
+                const response = await fetch(url);
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
+                console.log('Response headers:', response.headers);
+
+                if (!response.ok) {
+                    console.error('Response not ok, status:', response.status, 'statusText:', response.statusText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('Received data:', data);
+
+                if (isAdmin) {
+                    // For admin, channels come from /api/v1/monitored-channels/ endpoint
+                    channels = data.map(channel => ({
+                        id: channel.id,
+                        channel_title: channel.channel_title,
+                        channel_username: channel.channel_username,
+                        channel_link: channel.channel_link,
+                        is_selected: channel.is_active, // For admin, selected means active
+                        topic_title: channel.topic_title,
+                        topic_id: channel.topic_id
+                    }));
+                } else {
+                    // For regular users, channels come from user-channel-selections endpoint
+                    channels = data.channels;
+                    autoSelected = data.auto_selected;
+                }
+
+                console.log('Channels loaded:', channels.length, 'autoSelected:', autoSelected);
+
+                // Initialize selectedChannels based on server response
+                selectedChannels.clear();
+                channels.forEach(channel => {
+                    if (channel.is_selected) {
+                        selectedChannels.add(channel.id);
+                    }
+                });
+                console.log('Selected channels:', selectedChannels.size);
+
+                renderChannels();
+                updateStats();
+                updateSaveButton(); // Update checkbox state
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                console.log('UI updated successfully');
+
+            } catch (error) {
+                console.error('Error loading channels:', error);
+                console.error('Error stack:', error.stack);
+                document.getElementById('error').textContent = `Ошибка загрузки каналов: ${error.message}`;
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Render channels list
+        function renderChannels() {
+            const channelsList = document.getElementById('channelsList');
+            channelsList.innerHTML = '';
+
+            channels.forEach(channel => {
+                const isSelected = selectedChannels.has(channel.id);
+                const channelItem = document.createElement('div');
+                channelItem.className = `channel-item ${isSelected ? 'selected' : ''}`;
+                channelItem.onclick = (event) => {
+                    // Don't toggle if clicked on link or checkbox
+                    if (!event.target.closest('.channel-link') && !event.target.closest('input[type="checkbox"]')) {
+                        toggleChannel(channel.id);
+                    }
+                };
+
+                const topicInfo = channel.topic_title ?
+                    `<div class="channel-topic">Топик: ${channel.topic_title}</div>` : '';
+
+                let channelLink = '';
+                if (channel.channel_username) {
+                    const username = channel.channel_username.replace('@', '');
+                    channelLink = `<a href="https://t.me/${username}" target="_blank" class="channel-link" onclick="openChannelLink('https://t.me/${username}', event)">Открыть канал</a>`;
+                } else if (channel.channel_link) {
+                    channelLink = `<a href="${channel.channel_link}" target="_blank" class="channel-link" onclick="openChannelLink('${channel.channel_link}', event)">Открыть канал</a>`;
+                }
+
+                let adminActions = '';
+                if (isAdmin) {
+                    adminActions = `
+                        <div class="channel-admin-actions">
+                            <button class="channel-delete-btn" onclick="event.stopPropagation(); deleteChannel('${channel.id}')">🗑️</button>
+                        </div>
+                    `;
+                }
+
+                channelItem.innerHTML = `
+                    <div class="channel-checkbox">
+                        <input type="checkbox" ${isSelected ? 'checked' : ''}
+                               onchange="toggleChannel('${channel.id}')">
+                        <div class="channel-info">
+                            <div class="channel-title">${channel.channel_title || 'Без названия'}</div>
+                            <div class="channel-username">${channel.channel_username ? '@' + channel.channel_username.replace('@', '') : 'unknown'}</div>
+                            ${topicInfo}
+                            ${channelLink}
+                            ${adminActions}
+                        </div>
+                    </div>
+                `;
+
+                channelsList.appendChild(channelItem);
+            });
+        }
+
+        // Toggle channel selection with auto-save
+        async function toggleChannel(channelId) {
+            const wasSelected = selectedChannels.has(channelId);
+            const newState = !wasSelected;
+
+            // Update local state immediately for responsive UI
+            if (newState) {
+                selectedChannels.add(channelId);
+            } else {
+                selectedChannels.delete(channelId);
+            }
+
+            // Update UI immediately
+            const channelItems = document.querySelectorAll('.channel-item');
+            channels.forEach((channel, index) => {
+                if (channel.id === channelId) {
+                    const item = channelItems[index];
+                    if (newState) {
+                        item.classList.add('selected');
+                        item.querySelector('input[type="checkbox"]').checked = true;
+                    } else {
+                        item.classList.remove('selected');
+                        item.querySelector('input[type="checkbox"]').checked = false;
+                    }
+                }
+            });
+
+            updateStats();
+            updateSaveButton();
+
+            // Save to server
+            try {
+                let response;
+                if (isAdmin) {
+                    // For admin, toggle channel status using monitored-channels API
+                    response = await fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}/toggle?toggled_by=${userId}`, {
+                        method: 'POST'
+                    });
+                } else {
+                    // For regular users, toggle channel selection
+                    response = await fetch(`${API_BASE}/user/${userId}/toggle/${channelId}`, {
+                        method: 'POST'
+                    });
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                // Update channel state in our local array
+                channels.forEach(channel => {
+                    if (channel.id === channelId) {
+                        channel.is_selected = newState;
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error toggling channel:', error);
+                // Revert UI changes on error
+                if (newState) {
+                    selectedChannels.delete(channelId);
+                } else {
+                    selectedChannels.add(channelId);
+                }
+
+                // Revert UI
+                const channelItems = document.querySelectorAll('.channel-item');
+                channels.forEach((channel, index) => {
+                    if (channel.id === channelId) {
+                        const item = channelItems[index];
+                        if (!newState) {
+                            item.classList.add('selected');
+                            item.querySelector('input[type="checkbox"]').checked = true;
+                        } else {
+                            item.classList.remove('selected');
+                            item.querySelector('input[type="checkbox"]').checked = false;
+                        }
+                    }
+                });
+
+                updateStats();
+                updateSaveButton();
+
+                // Show error
+                document.getElementById('error').textContent = `Ошибка сохранения: ${error.message}`;
+                document.getElementById('error').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('error').style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // Update statistics
+        function updateStats() {
+            document.getElementById('selectedCount').textContent = selectedChannels.size;
+        }
+
+        // Update "Select All" checkbox state and bulk delete button
+        function updateSaveButton() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const bulkDeleteSection = document.getElementById('bulkDeleteSection');
+
+            if (channels.length > 0) {
+                const allSelected = selectedChannels.size === channels.length;
+                const noneSelected = selectedChannels.size === 0;
+
+                if (allSelected) {
+                    selectAllCheckbox.checked = true;
+                    selectAllCheckbox.indeterminate = false;
+                } else if (noneSelected) {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = false;
+                } else {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = true;
+                }
+
+                // Show/hide bulk delete button for admin
+                if (isAdmin && selectedChannels.size > 0) {
+                    bulkDeleteSection.style.display = 'block';
+                } else {
+                    bulkDeleteSection.style.display = 'none';
+                }
+            }
+        }
+
+        // Select all channels
+        function selectAllChannels() {
+            channels.forEach(channel => {
+                selectedChannels.add(channel.id);
+            });
+            renderChannels();
+            updateStats();
+            updateSaveButton();
+        }
+
+        // Deselect all channels
+        function deselectAllChannels() {
+            selectedChannels.clear();
+            renderChannels();
+            updateStats();
+            updateSaveButton();
+        }
+
+        // Toggle all channels - smart behavior like in Gmail/shopping cart with auto-save
+        async function toggleAllChannels() {
+            if (isAdmin) {
+                // For admin, activate/deactivate all channels
+                const allActive = selectedChannels.size === channels.length;
+                const targetState = !allActive; // If all active, deactivate all; if not all active, activate all
+
+                // Update local state immediately
+                if (targetState) {
+                    selectedChannels = new Set(channels.map(c => c.id));
+                } else {
+                    selectedChannels.clear();
+                }
+
+                // Update UI immediately
+                renderChannels();
+                updateStats();
+                updateSaveButton();
+
+                // Save to server - toggle only channels that need to change state
+                try {
+                    // Find channels that need to change
+                    const channelsToToggle = channels.filter(channel => channel.is_selected !== targetState);
+
+                    console.log(`Toggling ${channelsToToggle.length} channels to state: ${targetState}`);
+
+                    if (channelsToToggle.length > 0) {
+                        const promises = channelsToToggle.map(channel =>
+                            fetch(`${window.location.origin}/api/v1/monitored-channels/${channel.id}/toggle?toggled_by=${userId}`, {
+                                method: 'POST'
+                            })
+                        );
+
+                        await Promise.all(promises);
+                    }
+
+                    // Update local channel states
+                    channels.forEach(channel => {
+                        channel.is_selected = targetState;
+                    });
+
+                    console.log('Bulk toggle completed successfully');
+
+                } catch (error) {
+                    console.error('Error bulk toggling channels:', error);
+                    // Revert UI changes on error - reload from server
+                    loadChannels();
+
+                    // Show error
+                    document.getElementById('error').textContent = `Ошибка сохранения: ${error.message}`;
+                    document.getElementById('error').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('error').style.display = 'none';
+                    }, 3000);
+                }
+            } else {
+                // For regular users, toggle channel selection
+                const allSelected = selectedChannels.size === channels.length;
+                let newSelectedChannels;
+
+                if (allSelected) {
+                    // If all are selected, deselect all
+                    newSelectedChannels = new Set();
+                } else {
+                    // If not all are selected, select all
+                    newSelectedChannels = new Set(channels.map(c => c.id));
+                }
+
+                // Update local state immediately
+                selectedChannels = newSelectedChannels;
+
+                // Update UI immediately
+                renderChannels();
+                updateStats();
+                updateSaveButton();
+
+                // Save to server
+                try {
+                    const response = await fetch(`${API_BASE}/quick-update`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            user_id: parseInt(userId),
+                            selected_channel_ids: Array.from(newSelectedChannels)
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    // Update channel states in our local array
+                    channels.forEach(channel => {
+                        channel.is_selected = newSelectedChannels.has(channel.id);
+                    });
+
+                } catch (error) {
+                    console.error('Error saving bulk channel selection:', error);
+                    // Revert UI changes on error - reload from server
+                    loadChannels();
+
+                    // Show error
+                    document.getElementById('error').textContent = `Ошибка сохранения: ${error.message}`;
+                    document.getElementById('error').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('error').style.display = 'none';
+                    }, 3000);
+                }
+            }
+        }
+
+        // Save channel selections
+        async function saveSelections() {
+            const saveBtn = document.getElementById('saveBtn');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Сохранение...';
+
+            try {
+                const response = await fetch(`${API_BASE}/quick-update`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: parseInt(userId),
+                        selected_channel_ids: Array.from(selectedChannels)
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                console.log('Save result:', result);
+
+                // Show success message
+                const selectedCount = selectedChannels.size;
+                document.getElementById('success').textContent = `Выбрано ${selectedCount} канал${selectedCount === 1 ? '' : selectedCount < 5 ? 'а' : 'ов'} - настройки сохранены!`;
+                document.getElementById('success').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('success').style.display = 'none';
+                }, 3000);
+
+                // Update original channel states
+                channels.forEach(channel => {
+                    channel.is_selected = selectedChannels.has(channel.id);
+                });
+
+                // Reset auto-selected flag after saving
+                autoSelected = false;
+
+                updateSaveButton();
+
+            } catch (error) {
+                console.error('Error saving selections:', error);
+                document.getElementById('error').textContent = `Ошибка сохранения: ${error.message}`;
+                document.getElementById('error').style.display = 'block';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Сохранить';
+            }
+        }
+
+        // Open channel link - try multiple methods to open in Telegram app
+        function openChannelLink(url, event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            console.log('Opening channel link:', url);
+            console.log('Platform:', window.Telegram?.WebApp?.platform);
+
+            if (window.Telegram && window.Telegram.WebApp) {
+                // Сначала пробуем WebApp.openTelegramLink для всех платформ
+                if (typeof window.Telegram.WebApp.openTelegramLink === 'function') {
+                    window.Telegram.WebApp.openTelegramLink(url);
+                    console.log('Opened via openTelegramLink');
+                    return;
+                }
+
+                const platform = window.Telegram.WebApp.platform;
+
+                // Fallback для macOS и desktop
+                if (platform === 'macos' || platform === 'tdesktop') {
+                    // Извлекаем username из URL
+                    const match = url.match(/t\.me\/([^\/\?]+)/);
+                    if (match) {
+                        const username = match[1];
+                        // Используем tg:// схему для desktop
+                        const tgUrl = `tg://resolve?domain=${username}`;
+                        window.location.href = tgUrl;
+                        console.log('Opened via tg:// scheme for macOS/desktop');
+                        return;
+                    }
+                }
+            }
+
+            // Fallback
+            window.open(url, '_blank');
+        }
+
+        // Event listeners - removed since save button is no longer used
+
+        // Initialize Telegram WebApp
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.ready();
+            window.Telegram.WebApp.expand();
+        }
+
+        // Initialize page based on admin mode
+        function initializePage() {
+            if (isAdmin) {
+                // Change page title and description for admin
+                document.getElementById('pageTitle').textContent = '🔧 Управление каналами';
+                document.getElementById('pageDescription').textContent = 'Управление каналами для мониторинга системы';
+
+                // Add admin actions panel
+                const header = document.querySelector('.header');
+                const adminActions = document.createElement('div');
+                adminActions.className = 'admin-actions';
+                adminActions.innerHTML = `
+                    <button class="admin-btn" id="addChannelButton" onclick="showAddChannelForm()">➕ Добавить канал</button>
+                `;
+                header.appendChild(adminActions);
+
+                // Add add channel form (hidden by default)
+                const addChannelForm = document.createElement('div');
+                addChannelForm.id = 'addChannelForm';
+                addChannelForm.className = 'add-channel-form';
+                addChannelForm.style.display = 'none';
+                addChannelForm.innerHTML = `
+                    <h3>Добавить новый канал</h3>
+                    <div class="form-group">
+                        <label for="channelInput">Ссылка на канал или username:</label>
+                        <input type="text" id="channelInput" placeholder="https://t.me/rent_comissionfree/2629 или @rent_comissionfree">
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn" onclick="addNewChannel()">Добавить</button>
+                        <button type="button" class="btn btn-secondary" onclick="hideAddChannelForm()">Отмена</button>
+                    </div>
+                `;
+                header.appendChild(addChannelForm);
+
+                // Change stats text for admin
+                const statsText = document.querySelector('.stats-text');
+                if (statsText) {
+                    statsText.textContent = 'Всего каналов:';
+                }
+            }
+        }
+
+        // Show add channel form
+        function showAddChannelForm() {
+            document.getElementById('addChannelButton').style.display = 'none';
+            document.getElementById('addChannelForm').style.display = 'block';
+            document.getElementById('channelInput').focus();
+        }
+
+        // Hide add channel form
+        function hideAddChannelForm() {
+            document.getElementById('addChannelForm').style.display = 'none';
+            document.getElementById('addChannelButton').style.display = 'block';
+            document.getElementById('channelInput').value = '';
+        }
+
+        // Add new channel (admin only)
+        async function addNewChannel() {
+            const channelInput = document.getElementById('channelInput').value.trim();
+            if (!channelInput) {
+                showNotification('Введите ссылку на канал или username', 'error');
+                return;
+            }
+
+            // Show loading state
+            const addButton = document.querySelector('#addChannelForm .btn');
+            const originalText = addButton.textContent;
+            addButton.textContent = '⏳ Добавление...';
+            addButton.disabled = true;
+
+            try {
+                const response = await fetch(`${window.location.origin}/api/v1/monitored-channels/?created_by=${userId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        channel_input: channelInput
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log('Channel added:', result);
+
+                // Show success message
+                const channelName = extractChannelName(channelInput);
+                showNotification(`✅ Канал "${channelName}" успешно добавлен!`, 'success');
+
+                // Hide form and reload channels
+                hideAddChannelForm();
+                loadChannels();
+
+            } catch (error) {
+                console.error('Error adding channel:', error);
+
+                // Better error messages
+                let errorMessage = error.message;
+                if (errorMessage.includes('Only administrators can add channels')) {
+                    errorMessage = '❌ Только администраторы могут добавлять каналы.';
+                } else if (errorMessage.includes('Nobody is using this username')) {
+                    errorMessage = '❌ Канал не найден. Проверьте правильность названия.';
+                } else if (errorMessage.includes('Channel with ID')) {
+                    errorMessage = '✅ Канал уже добавлен в систему.';
+                } else if (errorMessage.includes('Failed to create')) {
+                    errorMessage = '❌ Не удалось добавить канал.';
+                } else if (errorMessage.includes('Channel info missing channel_id')) {
+                    errorMessage = '❌ Не удалось получить информацию о канале. Попробуйте другой формат ссылки.';
+                } else {
+                    errorMessage = `❌ Ошибка: ${errorMessage}`;
+                }
+
+                showNotification(errorMessage, 'error');
+            } finally {
+                // Restore button
+                addButton.textContent = originalText;
+                addButton.disabled = false;
+            }
+        }
+
+        // Extract channel name from input
+        function extractChannelName(channelInput) {
+            if (channelInput.includes('t.me/')) {
+                const match = channelInput.match(/t\.me\/([^\/\?]+)/);
+                return match ? match[1] : channelInput;
+            } else if (channelInput.startsWith('@')) {
+                return channelInput.substring(1);
+            } else {
+                return channelInput;
+            }
+        }
+
+        // Show notification
+        function showNotification(message, type) {
+            const successDiv = document.getElementById('success');
+            const errorDiv = document.getElementById('error');
+
+            // Clear previous notifications
+            successDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+
+            if (type === 'success') {
+                successDiv.textContent = message;
+                successDiv.style.display = 'block';
+                setTimeout(() => {
+                    successDiv.style.display = 'none';
+                }, 5000);
+            } else {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+                setTimeout(() => {
+                    errorDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Confirm bulk delete with detailed warning
+        async function confirmBulkDelete() {
+            const selectedCount = selectedChannels.size;
+            if (selectedCount === 0) {
+                showNotification('❌ Выберите каналы для удаления', 'error');
+                return;
+            }
+
+            // Get channel names for confirmation
+            const selectedChannelNames = channels
+                .filter(channel => selectedChannels.has(channel.id))
+                .map(channel => channel.channel_title || channel.channel_username || 'Без названия')
+                .join(', ');
+
+            const message = `⚠️ Вы действительно хотите удалить ${selectedCount} выбранных каналов?\n\n` +
+                          `Каналы: ${selectedChannelNames}\n\n` +
+                          `❌ Это действие нельзя отменить!\n` +
+                          `Все подписки на эти каналы будут удалены.`;
+
+            if (confirm(message)) {
+                // Show loading state
+                const deleteButton = document.querySelector('#bulkDeleteSection .admin-btn');
+                const originalText = deleteButton.textContent;
+                deleteButton.textContent = '🗑️ Удаление...';
+                deleteButton.disabled = true;
+
+                try {
+                    // Delete selected channels
+                    const deletePromises = Array.from(selectedChannels).map(channelId =>
+                        fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}?deleted_by=${userId}`, {
+                            method: 'DELETE'
+                        })
+                    );
+
+                    await Promise.all(deletePromises);
+
+                    // Show success message
+                    showNotification(`✅ Удалено ${selectedCount} канал${selectedCount === 1 ? '' : selectedCount < 5 ? 'а' : 'ов'}!`, 'success');
+
+                    // Reload channels
+                    loadChannels();
+
+                } catch (error) {
+                    console.error('Error bulk deleting channels:', error);
+                    showNotification(`❌ Ошибка удаления каналов: ${error.message}`, 'error');
+                } finally {
+                    // Restore button
+                    deleteButton.textContent = originalText;
+                    deleteButton.disabled = false;
+                }
+            }
+        }
+
+        // Delete individual channel (admin only)
+        async function deleteChannel(channelId) {
+            if (confirm('Удалить этот канал? Это действие нельзя отменить.')) {
+                try {
+                    const response = await fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}?deleted_by=${userId}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    // Show success message
+                    document.getElementById('success').textContent = 'Канал успешно удален!';
+                    document.getElementById('success').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('success').style.display = 'none';
+                    }, 3000);
+
+                    // Reload channels
+                    loadChannels();
+
+                } catch (error) {
+                    console.error('Error deleting channel:', error);
+                    document.getElementById('error').textContent = `Ошибка удаления канала: ${error.message}`;
+                    document.getElementById('error').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('error').style.display = 'none';
+                    }, 3000);
+                }
+            }
+        }
+
+        // Initialize
+        if (userId) {
+            initializePage();
+            loadChannels();
+        }
+    </script>
+</body>
+</html>
