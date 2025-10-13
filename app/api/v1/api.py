@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    posts, channels, telegram, real_estate, search_settings, static, ngrok, 
+    posts, channels, telegram, real_estate, static, ngrok, 
     statistics, simple_filters, user_filter_matches, user_channel_selections, config, price_filters, admin, monitored_channels
 )
 
@@ -17,9 +17,6 @@ api_router.include_router(
 )
 api_router.include_router(
     real_estate.router, prefix="/real-estate", tags=["real-estate"]
-)
-api_router.include_router(
-    search_settings.router, prefix="/search-settings", tags=["search-settings"]
 )
 api_router.include_router(
     static.router, prefix="/static", tags=["static"]

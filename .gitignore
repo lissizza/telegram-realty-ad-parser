@@ -76,6 +76,11 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
