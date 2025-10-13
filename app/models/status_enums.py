@@ -23,6 +23,7 @@ class RealEstateAdStatus(str, Enum):
     PENDING = "pending"             # Ad created, waiting for processing
     PROCESSING = "processing"       # Currently being processed
     COMPLETED = "completed"         # Successfully processed and ready
+    FORWARDED = "forwarded"         # Ad has been forwarded to users (no more forwards)
     FAILED = "failed"              # Processing failed
     INVALID = "invalid"            # Invalid or malformed ad data
 

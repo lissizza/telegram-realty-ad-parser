@@ -1088,6 +1088,11 @@ class TelegramService:
     async def _check_filters_for_all_users(self, real_estate_ad: RealEstateAd, message: Message) -> None:
         """Check filters for ALL users and forward to matching users"""
         try:
+            # Check if ad has already been forwarded (prevent duplicates)
+            if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
+                logger.info("Ad %s already forwarded, skipping filter check", message.id)
+                return
+            
             db = mongodb.get_database()
             
             # Get all active filters from all users
@@ -1215,6 +1220,19 @@ class TelegramService:
             }
             await db.outgoing_posts.insert_one(forwarding_data)
 
+            # Update RealEstateAd status to FORWARDED to prevent duplicate forwards
+            if ad_id:
+                await db.real_estate_ads.update_one(
+                    {"_id": ObjectId(ad_id)},
+                    {
+                        "$set": {
+                            "processing_status": RealEstateAdStatus.FORWARDED.value,
+                            "updated_at": datetime.now(timezone.utc)
+                        }
+                    }
+                )
+                logger.info("Updated RealEstateAd %s status to FORWARDED", ad_id)
+
             # Update post status to forwarded
             await db.incoming_messages.update_one(
                 {"id": message.id, "channel_id": message.chat_id},
@@ -1296,33 +1314,9 @@ class TelegramService:
                 logger.error("Telegram client not initialized")
                 continue
             
-            # User filtering is now handled by the new channel selection system
-            
+            # Process all messages from the channel
             async for message in self.client.iter_messages(int(channel_id), limit=messages_to_fetch):
-                # Check if message matches user subscription criteria
-                should_process = False
-                
-                if user_id and channel_subscriptions:
-                    # Check against user subscription criteria
-                    for subscription in channel_subscriptions:
-                        sub_user_id = subscription["user_id"]
-                        topic_id = subscription["topic_id"]
-                        monitor_all_topics = subscription["monitor_all_topics"]
-                        
-                        if sub_user_id == user_id:
-                            if monitor_all_topics:
-                                should_process = True
-                            elif topic_id:
-                                should_process = await self._is_message_in_topic(message, channel_id, topic_id)
-                            else:
-                                should_process = True
-                            break
-                else:
-                    # Legacy mode - process all messages
-                    should_process = True
-                
-                if should_process:
-                    messages.append(message)
+                messages.append(message)
 
             recent_messages.extend(messages)
             logger.info("Fetched %s messages from channel %s", len(messages), channel_id)
@@ -1891,6 +1885,11 @@ class TelegramService:
 
                     # Convert to RealEstateAd object
                     ad = RealEstateAd(**ad_doc)
+                    
+                    # Skip ads that have already been forwarded
+                    if ad.processing_status == RealEstateAdStatus.FORWARDED:
+                        logger.info("Skipping ad %s - already forwarded", ad.original_post_id)
+                        continue
 
                     # Check against all users' filters using centralized service (DRY principle)
                     for user_id, user_filter_docs in user_filters.items():
