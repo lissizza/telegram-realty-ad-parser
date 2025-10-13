@@ -8,8 +8,6 @@ from typing import List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ContextTypes
 
-from app.bot.admin_decorators import require_admin, log_admin_action
-from app.models.admin import AdminPermission
 from app.services.admin_service import AdminService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.monitored_channel_service import MonitoredChannelService
@@ -268,10 +266,10 @@ async def admin_channels_list_callback(update: Update, context: ContextTypes.DEF
             status = "✅" if channel.is_active else "❌"
             topic_info = f" (топик {channel.topic_title or channel.topic_id})" if channel.topic_id else ""
 
-            # Формируем название канала
+            # Format channel name
             channel_name = channel.channel_title or channel.channel_username or f"ID:{channel.channel_id}"
 
-            # Формируем короткое имя для кнопки
+            # Format short name for button
             if channel.channel_username:
                 short_name = f"@{channel.channel_username.lstrip('@')}"
             else:
