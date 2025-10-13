@@ -7,6 +7,7 @@ a web application interface.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import aiohttp
 from telegram import (
@@ -115,7 +116,11 @@ class TelegramBot:
             "• Я буду искать подходящие объявления\n"
             "• Присылать их вам в личные сообщения\n"
             "• Показывать только то, что подходит под ваши критерии\n\n"
-            "**3. Управляйте поиском**\n"
+            "**3. Сохраняйте заметки**\n"
+            "• Пересылайте интересные объявления боту\n"
+            "• Они сохранятся как заметки без парсинга\n"
+            "• Используйте /test для парсинга с LLM (платно)\n\n"
+            "**4. Управляйте поиском**\n"
             "• Изменяйте фильтры в любое время\n"
             "• Смотрите статистику поиска\n"
             "• Останавливайте/запускайте поиск\n\n"
@@ -206,21 +211,55 @@ class TelegramBot:
 
 
     async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /test command - test message processing"""
+        """Handle /test command - parse real estate ad with LLM"""
         if not update.message:
             return
         if not context.args:
             await update.message.reply_text(
                 "Использование: /test <текст объявления>\n\n"
-                "Пример: /test Сдаю 3-комнатную квартиру в центре Еревана, 250000 драм"
+                "Пример: /test Сдаю 3-комнатную квартиру в центре Еревана, 250000 драм\n\n"
+                "⚠️ *Внимание: Использование LLM парсинга платное*"
             )
             return
 
         test_text = " ".join(context.args)
-        await update.message.reply_text(f"🧪 Тестирую обработку: {test_text}")
+        await update.message.reply_text(f"🧪 Парсинг объявления с помощью LLM...")
 
-        # Process the test message
-        await self.handle_message(update, context)
+        try:
+            # Parse with LLM
+            llm_service = LLMService()
+            real_estate_ad = await llm_service.parse_with_llm(
+                test_text, update.message.message_id, update.message.chat_id
+            )
+
+            if not real_estate_ad:
+                await update.message.reply_text(
+                    "❌ Не удалось распознать объявление о недвижимости. "
+                    "Попробуйте отправить более подробное описание."
+                )
+                return
+
+            # Save to database
+            db = mongodb.get_database()
+            ad_data = real_estate_ad.dict(exclude={"id"})
+            result = await db.real_estate_ads.insert_one(ad_data)
+            real_estate_ad.id = str(result.inserted_id)
+
+            # Send response
+            response = "🏠 **Объявление обработано!**\n\n"
+            response += f"**Тип:** {real_estate_ad.property_type}\n"
+            response += f"**Комнат:** {real_estate_ad.rooms_count}\n"
+            response += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
+            response += f"**Цена:** {real_estate_ad.price} {real_estate_ad.currency}\n"
+            response += f"**Район:** {real_estate_ad.district}\n"
+            response += f"**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n\n"
+            response += f"**Текст:** {test_text[:200]}..."
+
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error("Error parsing with LLM: %s", e)
+            await update.message.reply_text("❌ Произошла ошибка при парсинге. Попробуйте позже.")
 
     async def myid_command(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
         """Handle /myid command - get user ID and auto-authorize"""
@@ -556,48 +595,46 @@ class TelegramBot:
             await message.reply_text(f"❌ Произошла ошибка: {str(e)}")
 
     async def handle_message(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
-        """Handle regular messages"""
+        """Handle regular messages - save as notes without LLM parsing"""
         if not update.message or not update.message.text:
             return
 
         try:
-            # Process message as real estate ad
-
-            llm_service = LLMService()
-
-            # Parse with LLM
-            real_estate_ad = await llm_service.parse_with_llm(
-                update.message.text, update.message.message_id, update.message.chat_id
-            )
-
-            if not real_estate_ad:
-                await update.message.reply_text(
-                    "❌ Не удалось распознать объявление о недвижимости. "
-                    "Попробуйте отправить более подробное описание."
-                )
-                return
-
-            # Save to database
+            # Check if this is a forwarded message
+            is_forwarded = update.message.forward_from is not None or update.message.forward_from_chat is not None
+            
+            # Save as a simple note without LLM parsing to avoid costs
             db = mongodb.get_database()
-            ad_data = real_estate_ad.dict(exclude={"id"})
-            result = await db.real_estate_ads.insert_one(ad_data)
-            real_estate_ad.id = str(result.inserted_id)
+            
+            note_data = {
+                "user_id": update.effective_user.id,
+                "message_id": update.message.message_id,
+                "chat_id": update.message.chat_id,
+                "text": update.message.text,
+                "is_forwarded": is_forwarded,
+                "forward_from": str(update.message.forward_from.id) if update.message.forward_from else None,
+                "forward_from_chat": str(update.message.forward_from_chat.id) if update.message.forward_from_chat else None,
+                "created_at": update.message.date,
+                "saved_at": datetime.now(timezone.utc)
+            }
+            
+            await db.user_notes.insert_one(note_data)
 
-            # Send response
-            response = "🏠 **Объявление обработано!**\n\n"
-            response += f"**Тип:** {real_estate_ad.property_type}\n"
-            response += f"**Комнат:** {real_estate_ad.rooms_count}\n"
-            response += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
-            response += f"**Цена:** {real_estate_ad.price} {real_estate_ad.currency}\n"
-            response += f"**Район:** {real_estate_ad.district}\n"
-            response += f"**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n\n"
-            response += f"**Текст:** {update.message.text[:200]}..."
+            # Send simple confirmation
+            if is_forwarded:
+                response = "📝 **Пересланное сообщение сохранено!**\n\n"
+                response += f"**Текст:** {update.message.text[:200]}..."
+                response += "\n\n💡 *Сообщение сохранено как заметка без парсинга*"
+            else:
+                response = "📝 **Сообщение сохранено как заметка!**\n\n"
+                response += f"**Текст:** {update.message.text[:200]}..."
+                response += "\n\n💡 *Для парсинга объявлений используйте команду /test*"
 
             await update.message.reply_text(response, parse_mode="Markdown")
 
         except Exception as e:
-            logger.error("Error processing message: %s", e)
-            await update.message.reply_text("❌ Произошла ошибка при обработке сообщения. Попробуйте позже.")
+            logger.error("Error saving message as note: %s", e)
+            await update.message.reply_text("❌ Произошла ошибка при сохранении сообщения. Попробуйте позже.")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle callback queries"""
@@ -1124,6 +1161,7 @@ class TelegramBot:
             BotCommand("help", "ℹ️ Справка"),
             BotCommand("settings", "⚙️ Настройки поиска"),
             BotCommand("stats", "📊 Статистика"),
+            BotCommand("test", "🧪 Парсинг объявления (LLM)"),
         ]
 
         await self.application.bot.set_my_commands(commands)
