@@ -3,8 +3,6 @@ Admin commands for Telegram Bot
 """
 
 import logging
-from datetime import datetime, UTC
-from typing import List
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -15,6 +13,7 @@ from app.services.admin_service import AdminService
 from app.services.simple_filter_service import SimpleFilterService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.telegram_user_service import TelegramUserService
+from app.services.monitored_channel_service import MonitoredChannelService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +22,7 @@ admin_service = AdminService()
 filter_service = SimpleFilterService()
 selection_service = UserChannelSelectionService()
 telegram_user_service = TelegramUserService()
+monitored_channel_service = MonitoredChannelService()
 
 
 @require_admin(AdminPermission.VIEW_STATS)
@@ -98,8 +98,8 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def admin_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manage channels"""
     try:
-        # Get all channel subscriptions
-        subscriptions = await subscription_service.get_all_subscriptions()
+        # Get all monitored channels
+        subscriptions = await monitored_channel_service.get_all_channels()
         
         if not subscriptions:
             message = "📺 <b>Управление каналами</b>\n\n❌ Каналы не найдены"

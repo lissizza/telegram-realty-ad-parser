@@ -3,11 +3,12 @@ Admin callback handlers for inline keyboards
 """
 
 import logging
-from typing import List
 
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ContextTypes
 
+from app.core.config import settings
 from app.services.admin_service import AdminService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.monitored_channel_service import MonitoredChannelService
@@ -61,7 +62,6 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin panel callback"""
     user_id = update.effective_user.id
-    from app.core.config import settings
     web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}&admin=true"
 
     keyboard = [
@@ -87,9 +87,6 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """Admin stats callback - show search statistics"""
     try:
         # Get statistics from API (same as user stats command)
-        import aiohttp
-        from app.core.config import settings
-
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{settings.API_BASE_URL}/api/v1/statistics/") as response:
                 if response.status == 200:
@@ -123,8 +120,6 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     stats_text = "❌ Не удалось получить статистику. Попробуйте позже."
 
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error("Error getting statistics: %s", e)
         stats_text = "❌ Ошибка при получении статистики. Попробуйте позже."
 
@@ -239,7 +234,6 @@ async def admin_settings_callback(update: Update, context: ContextTypes.DEFAULT_
 async def admin_channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin channels callback - open web interface directly"""
     user_id = update.effective_user.id
-    from app.core.config import settings
     web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"
     
     await update.callback_query.edit_message_text(
@@ -302,7 +296,6 @@ async def admin_channels_list_callback(update: Update, context: ContextTypes.DEF
 async def admin_add_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin add channel callback - show web interface link"""
     user_id = update.effective_user.id
-    from app.core.config import settings
     web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"
     
     message = (

@@ -1,8 +1,6 @@
 import logging
-from datetime import datetime
 
 from app.db.mongodb import mongodb
-from app.models.telegram import PropertyType, RentalType
 
 logger = logging.getLogger(__name__)
 
@@ -40,38 +38,6 @@ async def init_database():
 
         logger.info("Database indexes created successfully")
 
-        # Create sample filter if none exist
-        await create_sample_filter(db)
-
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise
-
-
-async def create_sample_filter(db):
-    """Create a sample filter if no filters exist"""
-    try:
-        filter_count = await db.simple_filters.count_documents({})
-
-        if filter_count == 0:
-            sample_filter = {
-                "name": "Sample 2-3 Room Apartment Filter",
-                "description": "Looking for 2-3 room apartments in any district",
-                "property_types": [PropertyType.APARTMENT],
-                "rental_types": [RentalType.LONG_TERM],
-                "min_rooms": 2,
-                "max_rooms": 3,
-                "min_price": 100000,
-                "max_price": 500000,
-                "price_currency": "AMD",
-                "districts": ["Центр", "Кентрон", "Арабкир"],
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
-
-            await db.simple_filters.insert_one(sample_filter)
-            logger.info("Sample filter created")
-
-    except Exception as e:
-        logger.error(f"Error creating sample filter: {e}")
