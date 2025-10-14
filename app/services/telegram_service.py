@@ -873,8 +873,12 @@ class TelegramService:
                         # Create RealEstateAd object from the duplicate
                         real_estate_ad = RealEstateAd(**real_estate_ad_doc)
                         
-                        # Forward the duplicate using the existing parsed data (without re-parsing with LLM)
-                        await self._check_filters_for_all_users(real_estate_ad, message)
+                        # Check if the original ad was already forwarded
+                        if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
+                            logger.info("Original ad %s already forwarded, skipping duplicate %s", duplicate_by_hash["real_estate_ad_id"], message.id)
+                        else:
+                            # Forward the duplicate using the existing parsed data (without re-parsing with LLM)
+                            await self._check_filters_for_all_users(real_estate_ad, message)
                         
                 logger.info("Duplicate message %s processed without LLM parsing", message.id)
                 return
