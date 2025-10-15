@@ -1139,8 +1139,16 @@ class TelegramService:
                     if filter_obj.matches_with_price_filters(real_estate_ad, price_filters):
                         logger.info("Ad %s matches filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
+                        # Check if ad has already been forwarded (prevent duplicates within the same processing cycle)
+                        if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
+                            logger.info("Ad %s already forwarded, skipping filter '%s'", message.id, filter_obj.name)
+                            continue
+                        
                         # Forward to user
                         await self._forward_post(message, real_estate_ad, filter_id, filter_obj.name, user_id)
+                        
+                        # Update the real_estate_ad object status to prevent further forwards in this cycle
+                        real_estate_ad.processing_status = RealEstateAdStatus.FORWARDED
                     else:
                         logger.info("Ad %s does not match filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
