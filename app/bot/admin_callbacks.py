@@ -234,7 +234,7 @@ async def admin_settings_callback(update: Update, context: ContextTypes.DEFAULT_
 async def admin_channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin channels callback - open web interface directly"""
     user_id = update.effective_user.id
-    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"
+    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-management"
     
     await update.callback_query.edit_message_text(
         "📺 <b>Управление каналами</b>",
@@ -296,7 +296,7 @@ async def admin_channels_list_callback(update: Update, context: ContextTypes.DEF
 async def admin_add_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin add channel callback - show web interface link"""
     user_id = update.effective_user.id
-    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"
+    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-management"
     
     message = (
         "➕ <b>Добавить новый канал</b>\n\n"
