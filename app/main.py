@@ -150,15 +150,33 @@ async def health_check():
         health_status["components"]["redis"] = f"unhealthy: {str(e)}"
         health_status["status"] = "unhealthy"
 
-    # Check Telegram bot status (simplified)
+    # Check Telegram bot status
     try:
         telegram_service = get_telegram_service()
         if telegram_service:
-            health_status["components"]["telegram_bot"] = "initialized"
+            # Check if TelegramService is healthy
+            if telegram_service.is_connection_healthy():
+                health_status["components"]["telegram_bot"] = "healthy"
+                health_status["components"]["telegram_service"] = "connected"
+            else:
+                health_status["components"]["telegram_bot"] = "unhealthy"
+                health_status["components"]["telegram_service"] = "disconnected"
+                health_status["status"] = "unhealthy"
+            
+            # Add detailed connection status
+            health_status["components"]["telegram_details"] = telegram_service.get_connection_status()
         else:
             health_status["components"]["telegram_bot"] = "not_initialized"
+            health_status["components"]["telegram_service"] = "not_initialized"
+            health_status["status"] = "unhealthy"
     except Exception as e:
         health_status["components"]["telegram_bot"] = f"unhealthy: {str(e)}"
+        health_status["components"]["telegram_service"] = f"unhealthy: {str(e)}"
         health_status["status"] = "unhealthy"
 
+    # Return appropriate HTTP status code
+    if health_status["status"] == "unhealthy":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=health_status)
+    
     return health_status
