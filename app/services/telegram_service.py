@@ -40,12 +40,91 @@ class TelegramService:
         self._active_handlers: List[Any] = []
         # Store current user channels for handlers
         self._current_user_channels: Dict[int, List[Dict]] = {}
+        # Retry logic for connection errors
+        self._retry_attempts = 0
+        self._max_retries = 3
+        self._last_retry_time: Optional[datetime] = None
+        self._connection_healthy = True
 
     def set_notification_service(self, bot: Any) -> None:
         """Set the notification service with bot instance"""
         logger.info("Setting notification service with bot instance")
         self.notification_service = TelegramNotificationService(bot)
         logger.info("Notification service set successfully")
+
+    async def _handle_connection_error(self, error: Exception) -> bool:
+        """Handle connection errors with retry logic and admin notifications"""
+        self._retry_attempts += 1
+        self._connection_healthy = False
+        
+        # Calculate exponential backoff delay (1s, 2s, 4s, 8s, 16s, max 60s)
+        delay = min(2 ** (self._retry_attempts - 1), 60)
+        
+        logger.error(
+            "Connection error in TelegramService (attempt %d/%d): %s",
+            self._retry_attempts, self._max_retries, error,
+            extra={
+                "error_type": type(error).__name__,
+                "retry_attempt": self._retry_attempts,
+                "max_retries": self._max_retries,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        
+        if self._retry_attempts <= self._max_retries:
+            logger.info("Retrying connection in %d seconds...", delay)
+            self._last_retry_time = datetime.now(timezone.utc)
+            await asyncio.sleep(delay)
+            return True  # Will retry
+        else:
+            # Max retries exceeded, notify admins
+            logger.error("Max retry attempts (%d) exceeded for connection error", self._max_retries)
+            await self._notify_admins_connection_failed(error)
+            return False  # Will not retry
+
+    async def _notify_admins_connection_failed(self, error: Exception) -> None:
+        """Notify super-admins about connection failure"""
+        if not self.notification_service:
+            logger.warning("No notification service available for admin notification")
+            return
+            
+        try:
+            from app.services.admin_notification_service import admin_notification_service
+            
+            error_details = f"{type(error).__name__}: {str(error)}"
+            await admin_notification_service.notify_service_restart(
+                attempt=self._retry_attempts,
+                error=error_details,
+                will_retry=False
+            )
+            logger.info("Admin notification sent for connection failure")
+        except Exception as e:
+            logger.error("Failed to send admin notification: %s", e)
+
+    def _reset_retry_state(self) -> None:
+        """Reset retry state after successful connection"""
+        self._retry_attempts = 0
+        self._last_retry_time = None
+        self._connection_healthy = True
+        logger.info("Connection retry state reset - connection is healthy")
+
+    def is_connection_healthy(self) -> bool:
+        """Check if the connection is healthy"""
+        if not self.client:
+            return False
+        return self._connection_healthy and self.client.is_connected()
+
+    def get_connection_status(self) -> Dict[str, Any]:
+        """Get detailed connection status for health checks"""
+        return {
+            "is_connected": self.client.is_connected() if self.client else False,
+            "is_monitoring": self.is_monitoring,
+            "is_healthy": self._connection_healthy,
+            "retry_attempts": self._retry_attempts,
+            "max_retries": self._max_retries,
+            "last_retry_time": self._last_retry_time.isoformat() if self._last_retry_time else None,
+            "initialized": self._initialized
+        }
 
     def _generate_message_hash(self, message_text: str) -> str:
         """Generate hash for message content to detect duplicates"""
@@ -139,79 +218,97 @@ class TelegramService:
         await self._update_topic_cache(channel_id, topic_id)
 
     async def start_monitoring(self) -> None:
-        """Start monitoring Telegram channels - NEW VERSION: monitors all channels, checks all filters"""
+        """Start monitoring Telegram channels with retry logic for connection errors"""
         if self.is_monitoring:
             logger.warning("Monitoring is already active")
             return
 
-        try:
-            # Initialize Telegram client only if not already exists and not initialized
-            if not self.client or not self._initialized:
-                if self.client:
-                    # Clean up existing client if it exists but not properly initialized
-                    try:
-                        await self.client.disconnect()
-                    except Exception:
-                        pass  # Ignore errors during cleanup
-                
-                self.client = TelegramClient(
-                    settings.TELEGRAM_SESSION_NAME, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH
-                )
-                await self.client.start(phone=settings.TELEGRAM_PHONE)
-                self._initialized = True
-                logger.info("Telegram client initialized successfully")
-            elif not self.client.is_connected():
-                await self.client.start(phone=settings.TELEGRAM_PHONE)
-                logger.info("Telegram client reconnected")
-
-            # Get monitored channels from new system
-            monitored_channels = await self._get_monitored_channels_new()
-            
-            if not monitored_channels:
-                logger.warning("No monitored channels found")
-                return
-
-            logger.info("Monitoring %d channels: %s", len(monitored_channels), [c["channel_id"] for c in monitored_channels])
-            
-            # Register handlers for all monitored channels
-            await self._register_monitored_channel_handlers(monitored_channels)
-
-            self.is_monitoring = True
-            logger.info("Started monitoring Telegram channels")
-
-            # Start the client in background without blocking
-            logger.info("Starting Telegram client in background...")
-            
-            # Check if client is connected
-            if self.client.is_connected():
-                logger.info("Telegram client is already connected")
-            else:
-                logger.warning("Telegram client is not connected, attempting to start...")
-                try:
+        while True:
+            try:
+                # Initialize Telegram client only if not already exists and not initialized
+                if not self.client or not self._initialized:
+                    if self.client:
+                        # Clean up existing client if it exists but not properly initialized
+                        try:
+                            await self.client.disconnect()
+                        except Exception:
+                            pass  # Ignore errors during cleanup
+                    
+                    self.client = TelegramClient(
+                        settings.TELEGRAM_SESSION_NAME, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH
+                    )
                     await self.client.start(phone=settings.TELEGRAM_PHONE)
-                    logger.info("Telegram client started successfully")
-                except Exception as e:
-                    logger.error("Failed to start Telegram client: %s", e)
-                    raise
-            
-            # Create background task with error handling
-            async def run_client():
-                try:
-                    logger.info("Telegram client background task started")
-                    await self.client.run_until_disconnected()
-                    logger.info("Telegram client disconnected")
-                except Exception as e:
-                    logger.error("Error in Telegram client background task: %s", e)
-            
-            asyncio.create_task(run_client())
-            logger.info("Telegram client background task created")
-            
-            # Load recent messages from monitored channels
-            await self._load_recent_messages_from_monitored_channels(monitored_channels, settings.STARTUP_MESSAGE_LIMIT)
+                    self._initialized = True
+                    logger.info("Telegram client initialized successfully")
+                elif not self.client.is_connected():
+                    await self.client.start(phone=settings.TELEGRAM_PHONE)
+                    logger.info("Telegram client reconnected")
 
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error("Error starting monitoring: %s", e)
-            raise
+                # Reset retry state on successful connection
+                self._reset_retry_state()
+
+                # Get monitored channels from new system
+                monitored_channels = await self._get_monitored_channels_new()
+                
+                if not monitored_channels:
+                    logger.warning("No monitored channels found")
+                    return
+
+                logger.info("Monitoring %d channels: %s", len(monitored_channels), [c["channel_id"] for c in monitored_channels])
+                
+                # Register handlers for all monitored channels
+                await self._register_monitored_channel_handlers(monitored_channels)
+
+                self.is_monitoring = True
+                logger.info("Started monitoring Telegram channels")
+
+                # Start the client in background without blocking
+                logger.info("Starting Telegram client in background...")
+                
+                # Check if client is connected
+                if self.client.is_connected():
+                    logger.info("Telegram client is already connected")
+                else:
+                    logger.warning("Telegram client is not connected, attempting to start...")
+                    try:
+                        await self.client.start(phone=settings.TELEGRAM_PHONE)
+                        logger.info("Telegram client started successfully")
+                    except Exception as e:
+                        logger.error("Failed to start Telegram client: %s", e)
+                        raise
+                
+                # Create background task with error handling
+                async def run_client():
+                    try:
+                        logger.info("Telegram client background task started")
+                        await self.client.run_until_disconnected()
+                        logger.info("Telegram client disconnected")
+                    except Exception as e:
+                        logger.error("Error in Telegram client background task: %s", e)
+                        # Check if it's a connection error and handle retry
+                        if isinstance(e, (ConnectionError, TimeoutError, OSError)):
+                            await self._handle_connection_error(e)
+                
+                asyncio.create_task(run_client())
+                logger.info("Telegram client background task created")
+                
+                # Load recent messages from monitored channels
+                await self._load_recent_messages_from_monitored_channels(monitored_channels, settings.STARTUP_MESSAGE_LIMIT)
+                
+                # If we reach here, connection was successful
+                break
+
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # Handle connection errors with retry logic
+                will_retry = await self._handle_connection_error(e)
+                if not will_retry:
+                    logger.error("Max retry attempts exceeded, giving up on monitoring")
+                    raise
+                # Continue the loop to retry
+                continue
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error("Error starting monitoring: %s", e)
+                raise
 
     async def _get_monitored_channels_new(self) -> List[Dict]:
         """Get monitored channels from new system (not tied to users)"""
@@ -1139,8 +1236,17 @@ class TelegramService:
                     if filter_obj.matches_with_price_filters(real_estate_ad, price_filters):
                         logger.info("Ad %s matches filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
+                        # Check if ad has already been forwarded (prevent duplicates within the same processing cycle)
+                        if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
+                            logger.info("Ad %s already forwarded, skipping filter '%s'", message.id, filter_obj.name)
+                            continue
+                        
                         # Forward to user
                         await self._forward_post(message, real_estate_ad, filter_id, filter_obj.name, user_id)
+                        
+                        # Update the real_estate_ad object status to prevent further forwards in this cycle
+                        real_estate_ad.processing_status = RealEstateAdStatus.FORWARDED
+                        logger.info("Updated RealEstateAd object status to FORWARDED to prevent duplicate forwards")
                     else:
                         logger.info("Ad %s does not match filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
