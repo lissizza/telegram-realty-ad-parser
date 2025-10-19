@@ -677,7 +677,7 @@ class TelegramBot:
                 [
                     InlineKeyboardButton(
                         "📺 Управление каналами",
-                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-subscriptions?user_id={user_id}"),
+                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
                     )
                 ],
                 [InlineKeyboardButton("📊 Статистика", callback_data="stats")],

@@ -140,18 +140,18 @@ class TelegramService:
             return
 
         try:
-            # Get all active subscriptions to find unique channel-topic combinations
+            # Get all active monitored channels to find unique channel-topic combinations
             db = mongodb.get_database()
-            subscriptions = await db.user_channel_subscriptions.find({
+            monitored_channels = await db.monitored_channels.find({
                 "is_active": True,
                 "topic_id": {"$ne": None}
             }).to_list(length=None)
 
             # Extract unique channel-topic combinations
             unique_combinations = set()
-            for sub in subscriptions:
-                channel_id = sub.get("channel_id")
-                topic_id = sub.get("topic_id")
+            for channel in monitored_channels:
+                channel_id = channel.get("channel_id")
+                topic_id = channel.get("topic_id")
                 if channel_id and topic_id:
                     # Convert channel_id to integer if it's a string
                     if isinstance(channel_id, str):

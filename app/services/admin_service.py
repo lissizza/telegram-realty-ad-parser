@@ -205,8 +205,8 @@ class AdminService:
             active_users = await db.admin_users.count_documents({"is_active": True})
             
             # Count channels
-            total_channels = await db.user_channel_subscriptions.count_documents({})
-            active_channels = await db.user_channel_subscriptions.count_documents({"is_active": True})
+            total_channels = await db.monitored_channels.count_documents({})
+            active_channels = await db.monitored_channels.count_documents({"is_active": True})
             
             # Count filters
             total_filters = await db.simple_filters.count_documents({})

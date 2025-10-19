@@ -44,9 +44,8 @@ async def get_statistics():
         # Count non-real-estate posts
         non_real_estate = await db.incoming_messages.count_documents({"is_real_estate": False})
         
-        # Count active channels from user subscriptions
-        active_channels = await db.user_channel_subscriptions.distinct("channel_id", {"is_active": True})
-        active_channels = len(active_channels)
+        # Count active channels from monitored channels
+        active_channels = await db.monitored_channels.count_documents({"is_active": True})
         
         # Count active search settings
         active_search_settings = await db.search_settings.count_documents({"is_active": True})
