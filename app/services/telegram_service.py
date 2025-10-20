@@ -21,7 +21,7 @@ from app.services.admin_notification_service import admin_notification_service
 from app.services.llm_service import LLMService
 from app.services.notification_service import TelegramNotificationService
 from app.services.price_filter_service import PriceFilterService
-from app.services.simple_filter_service import SimpleFilterService
+from app.services.filter_service import FilterService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.user_service import user_service
 
@@ -34,7 +34,7 @@ class TelegramService:
     def __init__(self) -> None:
         self.client: Optional[TelegramClient] = None
         self.llm_service = LLMService()
-        self.simple_filter_service = SimpleFilterService()
+        self.filter_service = FilterService()
         self.notification_service: Optional[TelegramNotificationService] = None
         self.is_monitoring = False
         # Cache for topic top_message IDs to reduce API calls
@@ -910,6 +910,14 @@ class TelegramService:
             # Generate message hash for duplicate detection
             message_text = message.text or ""
             message_hash = self._generate_message_hash(message_text)
+            
+            # Get channel title for logging and data creation
+            channel_title = "Unknown"
+            try:
+                if message.chat and hasattr(message.chat, "title"):
+                    channel_title = message.chat.title
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning("Could not get channel title for message %s: %s", message.id, e)
             
             # Check if we already have a RealEstateAd with this original_post_id
             db = mongodb.get_database()
@@ -2029,7 +2037,7 @@ class TelegramService:
                     "message": "No active filters found",
                 }
 
-            filter_service = SimpleFilterService()
+            filter_service = FilterService()
 
             # Process each ad
             for ad_doc in ads_list:

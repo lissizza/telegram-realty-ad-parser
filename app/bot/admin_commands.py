@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 from app.bot.admin_decorators import require_admin, require_super_admin, log_admin_action
 from app.models.admin import AdminPermission, UserRole
 from app.services.admin_service import AdminService
-from app.services.simple_filter_service import SimpleFilterService
+from app.services.filter_service import FilterService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.telegram_user_service import TelegramUserService
 from app.services.monitored_channel_service import MonitoredChannelService
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Service instances
 admin_service = AdminService()
-filter_service = SimpleFilterService()
+filter_service = FilterService()
 selection_service = UserChannelSelectionService()
 telegram_user_service = TelegramUserService()
 monitored_channel_service = MonitoredChannelService()
