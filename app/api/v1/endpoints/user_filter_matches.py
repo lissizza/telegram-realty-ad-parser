@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.models.user_filter_match import UserFilterMatch
-from app.services.user_filter_match_service import UserFilterMatchService
+from app.services.filter_service import FilterService
 
 router = APIRouter()
 
@@ -26,9 +26,9 @@ class UserFilterMatchResponse(BaseModel):
     status: str
 
 
-def get_user_filter_match_service() -> UserFilterMatchService:
-    """Get user filter match service instance"""
-    return UserFilterMatchService()
+def get_filter_service() -> FilterService:
+    """Get filter service instance"""
+    return FilterService()
 
 
 @router.get("/", response_model=List[UserFilterMatchResponse])
@@ -36,7 +36,7 @@ async def get_user_filter_matches(
     user_id: Optional[int] = Query(None, description="Filter by user ID"),
     forwarded: Optional[bool] = Query(None, description="Filter by forwarded status"),
     limit: int = Query(100, ge=1, le=1000, description="Limit number of results"),
-    service: UserFilterMatchService = Depends(get_user_filter_match_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Get user filter matches with optional filtering"""
     try:
@@ -75,7 +75,7 @@ async def get_user_filter_matches(
 @router.get("/unforwarded", response_model=List[UserFilterMatchResponse])
 async def get_unforwarded_matches(
     user_id: int = Query(..., description="User ID to get unforwarded matches for"),
-    service: UserFilterMatchService = Depends(get_user_filter_match_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Get all unforwarded matches for a specific user"""
     try:
@@ -104,7 +104,7 @@ async def get_unforwarded_matches(
 @router.post("/{match_id}/mark-forwarded", response_model=dict)
 async def mark_match_as_forwarded(
     match_id: str,
-    service: UserFilterMatchService = Depends(get_user_filter_match_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Mark a user filter match as forwarded"""
     try:
@@ -122,7 +122,7 @@ async def mark_match_as_forwarded(
 @router.get("/ad/{real_estate_ad_id}", response_model=List[UserFilterMatchResponse])
 async def get_matches_for_ad(
     real_estate_ad_id: str,
-    service: UserFilterMatchService = Depends(get_user_filter_match_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Get all matches for a specific real estate ad"""
     try:

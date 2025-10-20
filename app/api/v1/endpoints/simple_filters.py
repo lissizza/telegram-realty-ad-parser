@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.models.simple_filter import SimpleFilter
-from app.services.simple_filter_service import SimpleFilterService
+from app.services.filter_service import FilterService
 
 router = APIRouter()
 
@@ -95,14 +95,14 @@ class SimpleFilterUpdate(BaseModel):
     has_pool: Optional[bool] = None
 
 
-def get_simple_filter_service() -> SimpleFilterService:
-    return SimpleFilterService()
+def get_filter_service() -> FilterService:
+    return FilterService()
 
 
 @router.get("/user/{user_id}", response_model=List[SimpleFilter])
 async def get_simple_filters_by_user(
     user_id: int,
-    service: SimpleFilterService = Depends(get_simple_filter_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Get simple filters for a specific user ID"""
     return await service.get_active_filters(user_id)
@@ -111,14 +111,14 @@ async def get_simple_filters_by_user(
 @router.get("/", response_model=List[SimpleFilter])
 async def get_simple_filters(
     user_id: Optional[int] = Query(None, description="Filter by user ID"),
-    service: SimpleFilterService = Depends(get_simple_filter_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Get simple filters, optionally filtered by user ID"""
     return await service.get_active_filters(user_id)
 
 
 @router.get("/{filter_id}", response_model=SimpleFilter)
-async def get_simple_filter(filter_id: str, service: SimpleFilterService = Depends(get_simple_filter_service)):
+async def get_simple_filter(filter_id: str, service: FilterService = Depends(get_filter_service)):
     """Get a specific simple filter by ID"""
     try:
         filter_obj = await service.get_filter_by_id(filter_id)
@@ -131,7 +131,7 @@ async def get_simple_filter(filter_id: str, service: SimpleFilterService = Depen
 
 @router.post("/", response_model=dict)
 async def create_simple_filter(
-    filter_data: SimpleFilterCreate, service: SimpleFilterService = Depends(get_simple_filter_service)
+    filter_data: SimpleFilterCreate, service: FilterService = Depends(get_filter_service)
 ):
     """Create a new simple filter"""
     try:
@@ -168,7 +168,7 @@ async def update_simple_filter(
     filter_id: str, 
     filter_data: SimpleFilterUpdate, 
     user_id: int = Query(..., description="User ID for ownership verification"),
-    service: SimpleFilterService = Depends(get_simple_filter_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Update an existing simple filter"""
     logger = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ async def update_simple_filter(
 async def delete_simple_filter(
     filter_id: str, 
     user_id: int = Query(..., description="User ID for ownership verification"),
-    service: SimpleFilterService = Depends(get_simple_filter_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Delete a simple filter"""
     try:
@@ -239,7 +239,7 @@ async def delete_simple_filter(
 async def toggle_simple_filter(
     filter_id: str, 
     user_id: int = Query(..., description="User ID for ownership verification"),
-    service: SimpleFilterService = Depends(get_simple_filter_service)
+    service: FilterService = Depends(get_filter_service)
 ):
     """Toggle filter active status"""
     try:

@@ -12,7 +12,7 @@ import redis.asyncio as redis
 from app.core.config import settings
 from app.models.message_queue import ProcessingResult, ProcessingStatus, QueuedMessage
 from app.services.llm_service import LLMService
-from app.services.simple_filter_service import SimpleFilterService
+from app.services.filter_service import FilterService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class MessageQueueService:
     def __init__(self) -> None:
         self.redis_client: Optional[redis.Redis] = None
         self.llm_service = LLMService()
-        self.filter_service = SimpleFilterService()
+        self.filter_service = FilterService()
         self.is_processing = False
 
     async def get_redis_client(self) -> redis.Redis:
