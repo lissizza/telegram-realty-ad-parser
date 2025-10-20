@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
 import logging
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, types
 from telethon.tl.types import Message
 
 from app.core.config import settings
@@ -16,9 +17,12 @@ from app.models.incoming_message import IncomingMessage
 from app.models.status_enums import IncomingMessageStatus, RealEstateAdStatus, OutgoingPostStatus
 from app.models.simple_filter import SimpleFilter
 from app.models.telegram import RealEstateAd
+from app.services.admin_notification_service import admin_notification_service
 from app.services.llm_service import LLMService
 from app.services.notification_service import TelegramNotificationService
+from app.services.price_filter_service import PriceFilterService
 from app.services.simple_filter_service import SimpleFilterService
+from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.user_service import user_service
 
 logger = logging.getLogger(__name__)
@@ -89,8 +93,6 @@ class TelegramService:
             return
             
         try:
-            from app.services.admin_notification_service import admin_notification_service
-            
             error_details = f"{type(error).__name__}: {str(error)}"
             await admin_notification_service.notify_service_restart(
                 attempt=self._retry_attempts,
@@ -909,8 +911,60 @@ class TelegramService:
             message_text = message.text or ""
             message_hash = self._generate_message_hash(message_text)
             
-            # Check if message already processed by ID
+            # Check if we already have a RealEstateAd with this original_post_id
             db = mongodb.get_database()
+            existing_ad = await db.real_estate_ads.find_one({"original_post_id": message.id})
+            if existing_ad and not force:
+                logger.info("Found existing RealEstateAd for message %s, skipping LLM parsing", message.id)
+                
+                # Create RealEstateAd object from existing data
+                real_estate_ad = RealEstateAd(**existing_ad)
+                
+                # Check if the original ad was already forwarded
+                if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
+                    logger.info("Original ad %s already forwarded, skipping duplicate %s", existing_ad["_id"], message.id)
+                else:
+                    # Forward using existing parsed data (without re-parsing with LLM)
+                    await self._check_filters_for_all_users(real_estate_ad, message)
+                
+                # Check if we need to update the incoming message status
+                existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
+                if existing_post:
+                    # Update existing incoming message to duplicate status
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.DUPLICATE,
+                                "real_estate_ad_id": str(existing_ad["_id"]),
+                                "updated_at": datetime.now(timezone.utc)
+                            }
+                        }
+                    )
+                    logger.info("Updated existing IncomingMessage %s to DUPLICATE status", message.id)
+                else:
+                    # Save the incoming message as duplicate
+                    duplicate_data = {
+                        "id": message.id,
+                        "channel_id": message.chat_id,
+                        "channel_title": channel_title,
+                        "message_text": message_text,
+                        "message_hash": message_hash,
+                        "date": message.date,
+                        "views": getattr(message, "views", None),
+                        "forwards": getattr(message, "forwards", None),
+                        "processing_status": IncomingMessageStatus.DUPLICATE,
+                        "is_real_estate": existing_ad.get("is_real_estate"),
+                        "real_estate_ad_id": str(existing_ad["_id"]),
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc)
+                    }
+                    
+                    await db.incoming_messages.insert_one(duplicate_data)
+                    logger.info("Saved duplicate message %s with DUPLICATE status", message.id)
+                return
+
+            # Check if message already processed by ID
             existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
 
             if existing_post:
@@ -923,7 +977,7 @@ class TelegramService:
                     message.id,
                     existing_post.get("processing_status"),
                 )
-            
+
             # Check if we have a duplicate by hash (different message ID but same content)
             # Exclude current message from search
             duplicate_by_hash = await db.incoming_messages.find_one({
@@ -1206,7 +1260,6 @@ class TelegramService:
             logger.info("Checking %d filters for ad %s", len(all_filters), message.id)
             
             # Get channel selection service
-            from app.services.user_channel_selection_service import UserChannelSelectionService
             selection_service = UserChannelSelectionService()
             
             # Check each filter
@@ -1227,7 +1280,6 @@ class TelegramService:
                     logger.info("Checking filter '%s' (user %s) for ad %s", filter_obj.name, user_id, message.id)
                     
                     # Get price filters for this filter
-                    from app.services.price_filter_service import PriceFilterService
                     price_filter_service = PriceFilterService()
                     filter_id = str(filter_doc["_id"])  # Use the _id from the database document
                     price_filters = await price_filter_service.get_price_filters_by_filter_id(filter_id)
@@ -1664,7 +1716,6 @@ class TelegramService:
                 clean_address = f"{clean_address}, Ереван"
             
             # URL encode the address
-            import urllib.parse
             encoded_address = urllib.parse.quote(clean_address)
             
             # Generate Yandex Maps link
@@ -1805,8 +1856,6 @@ class TelegramService:
             if not self.client:
                 return None
             
-            from telethon import functions
-            
             # Convert supergroup ID to regular ID for API call
             if channel_id < 0:
                 regular_id = abs(channel_id) - 1000000000000
@@ -1837,8 +1886,6 @@ class TelegramService:
             cache_key = (channel_id, topic_id)
             if cache_key in self.topic_cache:
                 return self.topic_cache[cache_key]
-            
-            from telethon import functions, types
             
             # Convert supergroup ID to regular ID for API call
             if channel_id < 0:
@@ -1982,11 +2029,7 @@ class TelegramService:
                     "message": "No active filters found",
                 }
 
-            from app.services.simple_filter_service import SimpleFilterService
-            from app.services.user_filter_match_service import UserFilterMatchService
-            
             filter_service = SimpleFilterService()
-            match_service = UserFilterMatchService()
 
             # Process each ad
             for ad_doc in ads_list:
