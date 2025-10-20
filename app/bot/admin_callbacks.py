@@ -98,13 +98,12 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 **Общая статистика:**
 • 🔍 Всего обработано сообщений: {stats_data.get('total_posts', 0)}
 • 🏠 Распарсено как недвижимость: {stats_data.get('parsed_ads', 0)}
-• 🚫 Отфильтровано спама: {stats_data.get('spam_filtered', 0)}
-• 📷 Только медиа (пропущено): {stats_data.get('media_only', 0)}
 • ❌ Не недвижимость: {stats_data.get('non_real_estate', 0)}
-• 🎯 Соответствует фильтрам: {stats_data.get('matched_filters', 0)}
-• ✅ Переслано пользователю: {stats_data.get('forwarded_ads', 0)}
+• 🔄 Дубликаты: {stats_data.get('duplicates', 0)}
+• 👥 Зарегистрированных пользователей: {stats_data.get('registered_users', 0)}
+• 🎯 Соответствует фильтрам (всего): {stats_data.get('matched_filters', 0)}
+• ✅ Переслано всем пользователям: {stats_data.get('forwarded_ads', 0)}
 • 📡 Активных каналов: {stats_data.get('active_channels', 0)}
-• ⚙️ Активных настроек: {stats_data.get('active_search_settings', 0)}
 
 **Статус системы:**
 • 🔄 Парсинг: {stats_data.get('parsing_status', 'неизвестно')}

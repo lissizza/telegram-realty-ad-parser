@@ -11,13 +11,12 @@ router = APIRouter()
 class StatisticsResponse(BaseModel):
     total_posts: int
     parsed_ads: int
-    spam_filtered: int
-    media_only: int
     non_real_estate: int
+    duplicates: int  # Messages marked as duplicates
     active_channels: int
-    active_search_settings: int
-    matched_filters: int
-    forwarded_ads: int  # Ads that were actually forwarded to user
+    registered_users: int  # Total registered users
+    matched_filters: int  # Total ads that matched any filter (all users)
+    forwarded_ads: int  # Total ads forwarded to all users
     parsing_status: str
     bot_status: str
     total_llm_cost: float
@@ -37,26 +36,28 @@ async def get_statistics():
         # Count parsed real estate ads
         parsed_ads = await db.real_estate_ads.count_documents({})
         
-        # Spam filtering removed - LLM handles it via is_real_estate
-        
-        # Media-only posts are no longer saved to database
-        
         # Count non-real-estate posts
         non_real_estate = await db.incoming_messages.count_documents({"is_real_estate": False})
+        
+        # Count duplicate messages
+        duplicates = await db.incoming_messages.count_documents({"processing_status": "duplicate"})
         
         # Count active channels from monitored channels
         active_channels = await db.monitored_channels.count_documents({"is_active": True})
         
-        # Count active search settings
-        active_search_settings = await db.search_settings.count_documents({"is_active": True})
-        
-        # Count matched filters (ads that matched any filter)
-        matched_filters = await db.real_estate_ads.count_documents({
-            "matched_filters": {"$exists": True, "$ne": []}
-        })
+        # Count registered users (admin users)
+        registered_users = await db.admin_users.count_documents({"is_active": True})
         
         # Count forwarded ads (ads that were actually sent to user)
         forwarded_ads = await db.outgoing_posts.count_documents({})
+        
+        # Count ads that were forwarded (have FORWARDED status)
+        forwarded_ads_by_status = await db.real_estate_ads.count_documents({
+            "processing_status": "forwarded"
+        })
+        
+        # Use the higher count as matched_filters (should be the same)
+        matched_filters = max(forwarded_ads, forwarded_ads_by_status)
         
         # Get LLM cost statistics
         llm_costs = await db.llm_costs.find({}).to_list(length=None)
@@ -73,11 +74,10 @@ async def get_statistics():
         return StatisticsResponse(
             total_posts=total_posts,
             parsed_ads=parsed_ads,
-            spam_filtered=0,  # Removed - LLM handles spam detection
-            media_only=0,  # No longer saved to database
             non_real_estate=non_real_estate,
+            duplicates=duplicates,
             active_channels=active_channels,
-            active_search_settings=active_search_settings,
+            registered_users=registered_users,
             matched_filters=matched_filters,
             forwarded_ads=forwarded_ads,
             parsing_status=parsing_status,
@@ -96,7 +96,7 @@ async def get_detailed_statistics():
     try:
         db = mongodb.get_database()
         
-        # Get status breakdown
+        # Get status breakdown for incoming messages
         status_pipeline = [
             {"$group": {
                 "_id": "$processing_status",
@@ -107,6 +107,18 @@ async def get_detailed_statistics():
         
         status_breakdown = await db.incoming_messages.aggregate(status_pipeline).to_list(length=None)
         status_counts = {item["_id"]: item["count"] for item in status_breakdown}
+        
+        # Get real estate ad status breakdown
+        ad_status_pipeline = [
+            {"$group": {
+                "_id": "$processing_status",
+                "count": {"$sum": 1}
+            }},
+            {"$sort": {"count": -1}}
+        ]
+        
+        ad_status_breakdown = await db.real_estate_ads.aggregate(ad_status_pipeline).to_list(length=None)
+        ad_status_counts = {item["_id"]: item["count"] for item in ad_status_breakdown}
         
         # Get recent activity (last 24 hours)
         yesterday = datetime.utcnow() - timedelta(days=1)
@@ -134,7 +146,8 @@ async def get_detailed_statistics():
         channel_breakdown = await db.incoming_messages.aggregate(channel_pipeline).to_list(length=None)
         
         return {
-            "status_breakdown": status_counts,
+            "incoming_message_status_breakdown": status_counts,
+            "real_estate_ad_status_breakdown": ad_status_counts,
             "recent_activity": {
                 "last_24h_posts": recent_activity
             },
