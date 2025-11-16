@@ -20,6 +20,6 @@ async def get_api_config():
     return APIConfig(
         api_base_url=settings.API_BASE_URL,
         simple_filters_url=f"{settings.API_BASE_URL}/api/v1/simple-filters",
-        channel_management_url=f"{settings.API_BASE_URL}/api/v1/static/channel-management",
+        channel_management_url=f"{settings.API_BASE_URL}/api/v1/static/channel-selection",
         search_settings_url=f"{settings.API_BASE_URL}/api/v1/static/search-settings"
     )

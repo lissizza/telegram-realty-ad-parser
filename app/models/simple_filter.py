@@ -62,14 +62,20 @@ class SimpleFilter(BaseModel):
             return False
         
         # Room count match
-        if ad.rooms_count is not None:
+        # If filter has room constraints but ad doesn't have room count, it doesn't match
+        if (self.min_rooms is not None or self.max_rooms is not None):
+            if ad.rooms_count is None:
+                return False
             if self.min_rooms is not None and ad.rooms_count < self.min_rooms:
                 return False
             if self.max_rooms is not None and ad.rooms_count > self.max_rooms:
                 return False
         
         # Area match
-        if ad.area_sqm is not None:
+        # If filter has area constraints but ad doesn't have area, it doesn't match
+        if (self.min_area is not None or self.max_area is not None):
+            if ad.area_sqm is None:
+                return False
             if self.min_area is not None and ad.area_sqm < self.min_area:
                 return False
             if self.max_area is not None and ad.area_sqm > self.max_area:

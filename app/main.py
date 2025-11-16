@@ -1,9 +1,51 @@
 import asyncio
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
+
+# Custom filter to suppress verbose NetworkError tracebacks
+class NetworkErrorFilter(logging.Filter):
+    """Filter to suppress verbose NetworkError tracebacks from telegram library"""
+    
+    def filter(self, record):
+        # Check if this is a NetworkError or ConnectionError from telegram
+        is_network_error = False
+        
+        # Check exc_info
+        if record.exc_info and record.exc_info[0]:
+            exc_type = record.exc_info[0]
+            exc_name = exc_type.__name__ if hasattr(exc_type, '__name__') else str(exc_type)
+            
+            if 'NetworkError' in exc_name or 'ConnectError' in exc_name or 'OSError' in exc_name:
+                is_network_error = True
+        
+        # Also check message text for network errors
+        msg_text = str(record.msg) if record.msg else ""
+        if 'NetworkError' in msg_text or 'ConnectError' in msg_text or 'No address associated with hostname' in msg_text:
+            is_network_error = True
+        
+        # Suppress full traceback for network errors
+        if is_network_error:
+            # Convert to simple error message without traceback
+            if record.exc_info and record.exc_info[1]:
+                error_msg = str(record.exc_info[1])
+                # Extract just the error message, not the full traceback
+                record.msg = f"Network error: {error_msg}"
+            elif 'NetworkError' in msg_text or 'ConnectError' in msg_text:
+                # Extract error message from text
+                if 'No address associated with hostname' in msg_text:
+                    record.msg = "Network error: No address associated with hostname"
+                else:
+                    record.msg = f"Network error: {msg_text[:200]}"  # Truncate long messages
+            
+            record.exc_info = None
+            record.exc_text = None
+        
+        return True
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -16,7 +58,13 @@ logging.getLogger("telethon.network").setLevel(logging.WARNING)
 logging.getLogger("telethon.crypto").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Add filter to telegram loggers to suppress verbose NetworkError tracebacks
+network_error_filter = NetworkErrorFilter()
+logging.getLogger("telegram.ext").addFilter(network_error_filter)
+logging.getLogger("telegram").addFilter(network_error_filter)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
@@ -29,6 +77,19 @@ from app.telegram_bot import telegram_bot
 
 logger = logging.getLogger(__name__)
 logger.info("Main module loaded")
+
+# Global variables for health check monitoring
+_last_healthy_time = None
+_unhealthy_start_time = None
+_MAX_UNHEALTHY_DURATION = 600  # 10 minutes in seconds
+_shutdown_scheduled = False
+
+
+async def _schedule_forced_shutdown(delay_seconds: float = 1.0) -> None:
+    """Schedule forced process shutdown to trigger container restart."""
+    await asyncio.sleep(delay_seconds)
+    logger.error("Forcing process exit to trigger container restart")
+    os._exit(1)
 
 
 @asynccontextmanager
@@ -128,6 +189,8 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint that verifies system components"""
+    global _last_healthy_time, _unhealthy_start_time, _shutdown_scheduled
+    
     health_status = {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat(), "components": {}}
 
     # Check MongoDB connection
@@ -176,7 +239,37 @@ async def health_check():
 
     # Return appropriate HTTP status code
     if health_status["status"] == "unhealthy":
+        # Track unhealthy duration
+        current_time = datetime.now(timezone.utc)
+        if _unhealthy_start_time is None:
+            _unhealthy_start_time = current_time
+            logger.warning("System became unhealthy, starting timer")
+        
+        unhealthy_duration = (current_time - _unhealthy_start_time).total_seconds()
+        
+        # If system has been unhealthy for too long, exit to trigger container restart
+        if unhealthy_duration > _MAX_UNHEALTHY_DURATION:
+            logger.error(
+                "System has been unhealthy for %d seconds (max: %d), exiting to trigger container restart",
+                unhealthy_duration, _MAX_UNHEALTHY_DURATION
+            )
+            global _shutdown_scheduled
+            if not _shutdown_scheduled:
+                _shutdown_scheduled = True
+                asyncio.create_task(_schedule_forced_shutdown())
+        
+        _last_healthy_time = None
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail=health_status)
+    else:
+        # System is healthy, reset unhealthy timer
+        if _unhealthy_start_time is not None:
+            unhealthy_duration = (datetime.now(timezone.utc) - _unhealthy_start_time).total_seconds()
+            logger.info("System recovered, was unhealthy for %d seconds", unhealthy_duration)
+            _unhealthy_start_time = None
+        if _shutdown_scheduled:
+            _shutdown_scheduled = False
+        
+        _last_healthy_time = datetime.now(timezone.utc)
     
     return health_status

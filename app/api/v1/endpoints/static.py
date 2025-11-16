@@ -14,10 +14,6 @@ async def get_search_settings_page():
     """Serve the search settings HTML page"""
     return FileResponse(STATIC_DIR / "search_settings.html")
 
-@router.get("/channel-management")
-async def get_channel_management_page():
-    """Serve the channel management HTML page"""
-    return FileResponse(STATIC_DIR / "channel_management.html")
 
 @router.get("/simple-filters")
 async def get_simple_filters_page():
@@ -29,6 +25,12 @@ async def get_simple_filters_page():
 async def get_channel_selection_page():
     """Serve the channel selection HTML page"""
     return FileResponse(STATIC_DIR / "channel_selection.html")
+
+
+@router.get("/admin-statistics")
+async def get_admin_statistics_page():
+    """Serve the admin statistics HTML page"""
+    return FileResponse(STATIC_DIR / "admin_statistics.html")
 
 @router.get("/")
 async def get_static_files():

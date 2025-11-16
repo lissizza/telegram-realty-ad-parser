@@ -654,42 +654,12 @@ class TelegramBot:
             await handle_admin_callback(update, context)
             return
             
-        if query.data == "stats":
+        if query.data == "start":
+            await self.start_command(update, context)
+        elif query.data == "stats":
             await self.stats_command(update, context)
         elif query.data == "help":
             await self.help_command(update, context)
-        elif query.data == "open_settings":
-            # Get user ID from the callback query
-            user_id = query.from_user.id if query.from_user else None
-            if not user_id:
-                await query.edit_message_text("❌ Не удалось определить ID пользователя.")
-                return
-                
-            # Open Web App directly
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "🏠 Управление фильтрами",
-                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "📺 Управление каналами",
-                        web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-management"),
-                    )
-                ],
-                [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-                [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            if query.message:
-                await query.message.reply_text(
-                    "🏠 **Управление недвижимостью**\n\nВыберите действие:",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown",
-                )
         elif query.data == "reprocess_menu":
             await self.reprocess_command(update, context)
         elif query.data == "refilter_menu":
