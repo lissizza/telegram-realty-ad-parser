@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from datetime import datetime, timedelta
-from typing import Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List
 
 from app.db.mongodb import mongodb
 
@@ -155,6 +155,171 @@ async def get_detailed_statistics():
             "recent_errors": error_posts,
             "generated_at": datetime.utcnow().isoformat()
         }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DailyStatsResponse(BaseModel):
+    labels: List[str]
+    messages: List[int]
+    ads: List[int]
+
+
+class LLMCostsResponse(BaseModel):
+    total_cost: float
+    today_cost: float
+    avg_daily_cost: float
+    requests: int
+    daily_costs: List[float]
+    labels: List[str]
+
+
+@router.get("/daily", response_model=DailyStatsResponse)
+async def get_daily_statistics():
+    """Get daily statistics for the last 7 days"""
+    try:
+        db = mongodb.get_database()
+        
+        labels = []
+        messages = []
+        ads = []
+        
+        for i in range(6, -1, -1):  # Last 7 days
+            date = datetime.now(timezone.utc) - timedelta(days=i)
+            start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            # Count messages for this day
+            message_count = await db.incoming_messages.count_documents({
+                "created_at": {"$gte": start_of_day, "$lte": end_of_day}
+            })
+            
+            # Count real estate ads for this day
+            ad_count = await db.real_estate_ads.count_documents({
+                "created_at": {"$gte": start_of_day, "$lte": end_of_day}
+            })
+            
+            labels.append(date.strftime("%d.%m"))
+            messages.append(message_count)
+            ads.append(ad_count)
+        
+        return DailyStatsResponse(
+            labels=labels,
+            messages=messages,
+            ads=ads
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/llm-costs", response_model=LLMCostsResponse)
+async def get_llm_costs():
+    """Get LLM costs statistics"""
+    try:
+        db = mongodb.get_database()
+        
+        # Get all LLM costs
+        costs_cursor = db.llm_costs.find({}).sort("created_at", 1)
+        all_costs = await costs_cursor.to_list(length=None)
+        
+        if not all_costs:
+            # Return empty data if no costs found
+            return LLMCostsResponse(
+                total_cost=0.0,
+                today_cost=0.0,
+                avg_daily_cost=0.0,
+                requests=0,
+                daily_costs=[0.0] * 7,
+                labels=[(datetime.now(timezone.utc) - timedelta(days=i)).strftime("%d.%m") for i in range(6, -1, -1)]
+            )
+        
+        # Calculate total cost
+        total_cost = sum(cost.get("cost_usd", 0) for cost in all_costs)
+        
+        # Calculate today's cost
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_costs = [cost for cost in all_costs 
+                      if cost.get("created_at") and cost.get("created_at").replace(tzinfo=timezone.utc) >= today]
+        today_cost = sum(cost.get("cost_usd", 0) for cost in today_costs)
+        
+        # Calculate daily costs for last 7 days
+        daily_costs = []
+        labels = []
+        
+        for i in range(6, -1, -1):
+            date = datetime.now(timezone.utc) - timedelta(days=i)
+            start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            day_costs = [cost for cost in all_costs 
+                        if cost.get("created_at") and 
+                        start_of_day <= cost.get("created_at").replace(tzinfo=timezone.utc) <= end_of_day]
+            day_total = sum(cost.get("cost_usd", 0) for cost in day_costs)
+            
+            daily_costs.append(round(day_total, 2))
+            labels.append(date.strftime("%d.%m"))
+        
+        # Calculate average daily cost
+        avg_daily_cost = total_cost / max(len(all_costs), 1) if all_costs else 0.0
+        
+        return LLMCostsResponse(
+            total_cost=round(total_cost, 2),
+            today_cost=round(today_cost, 2),
+            avg_daily_cost=round(avg_daily_cost, 2),
+            requests=len(all_costs),
+            daily_costs=daily_costs,
+            labels=labels
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChannelActivityResponse(BaseModel):
+    channel_id: str
+    channel_title: str
+    channel_username: str
+    message_count: int
+    ad_count: int
+
+
+@router.get("/channel-activity", response_model=List[ChannelActivityResponse])
+async def get_channel_activity():
+    """Get channel activity statistics"""
+    try:
+        db = mongodb.get_database()
+        
+        # Get all active monitored channels
+        channels = []
+        async for channel_doc in db.monitored_channels.find({"is_active": True}):
+            channel_id = channel_doc.get("channel_id")
+            if not channel_id:
+                continue
+                
+            # Count messages from this channel
+            message_count = await db.incoming_messages.count_documents({
+                "channel_id": int(channel_id)
+            })
+            
+            # Count real estate ads from this channel
+            ad_count = await db.real_estate_ads.count_documents({
+                "channel_id": int(channel_id)
+            })
+            
+            channels.append(ChannelActivityResponse(
+                channel_id=channel_id,
+                channel_title=channel_doc.get("channel_title", "Unknown"),
+                channel_username=channel_doc.get("channel_username", "unknown"),
+                message_count=message_count,
+                ad_count=ad_count
+            ))
+        
+        # Sort by message count (most active first)
+        channels.sort(key=lambda x: x.message_count, reverse=True)
+        
+        return channels[:5]  # Return top 5 channels
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

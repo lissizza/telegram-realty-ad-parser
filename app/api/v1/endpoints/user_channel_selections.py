@@ -167,6 +167,3 @@ async def quick_update_channel_selections(
     except Exception as e:
         logger.error("Error quick updating channel selections: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-

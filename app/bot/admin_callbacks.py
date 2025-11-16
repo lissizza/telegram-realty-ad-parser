@@ -63,9 +63,10 @@ async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """Admin panel callback"""
     user_id = update.effective_user.id
     web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}&admin=true"
+    stats_web_app_url = f"{settings.API_BASE_URL}/api/v1/static/admin-statistics?user_id={user_id}&admin=true"
 
     keyboard = [
-        [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton("📊 Статистика", web_app=WebAppInfo(url=stats_web_app_url))],
         [InlineKeyboardButton("📺 Управление каналами", web_app=WebAppInfo(url=web_app_url))],
         [InlineKeyboardButton("👥 Управление пользователями", callback_data="admin_users")],
         [InlineKeyboardButton("📋 Логи системы", callback_data="admin_logs")],
@@ -233,7 +234,7 @@ async def admin_settings_callback(update: Update, context: ContextTypes.DEFAULT_
 async def admin_channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin channels callback - open web interface directly"""
     user_id = update.effective_user.id
-    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-management"
+    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection"
     
     await update.callback_query.edit_message_text(
         "📺 <b>Управление каналами</b>",
@@ -295,7 +296,7 @@ async def admin_channels_list_callback(update: Update, context: ContextTypes.DEF
 async def admin_add_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin add channel callback - show web interface link"""
     user_id = update.effective_user.id
-    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-management"
+    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection"
     
     message = (
         "➕ <b>Добавить новый канал</b>\n\n"

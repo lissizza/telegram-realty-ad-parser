@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
 import logging
+import sys
 import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telethon import TelegramClient, events, functions, types
 from telethon.tl.types import Message
 
@@ -297,6 +298,9 @@ class TelegramService:
                 # Load recent messages from monitored channels
                 await self._load_recent_messages_from_monitored_channels(monitored_channels, settings.STARTUP_MESSAGE_LIMIT)
                 
+                # Reprocess any stuck messages (PROCESSING or ERROR status)
+                await self._reprocess_stuck_messages()
+                
                 # If we reach here, connection was successful
                 break
 
@@ -304,8 +308,9 @@ class TelegramService:
                 # Handle connection errors with retry logic
                 will_retry = await self._handle_connection_error(e)
                 if not will_retry:
-                    logger.error("Max retry attempts exceeded, giving up on monitoring")
-                    raise
+                    logger.error("Max retry attempts exceeded, giving up on monitoring. Exiting to trigger container restart.")
+                    # Exit process to trigger Docker container restart
+                    sys.exit(1)
                 # Continue the loop to retry
                 continue
             except Exception as e:  # pylint: disable=broad-except
@@ -398,15 +403,36 @@ class TelegramService:
 
                             if existing_post:
                                 current_status = existing_post.get("processing_status")
-                                # If already successfully processed, stop processing this channel
-                                # (we've caught up with previously processed messages)
+                                # If already successfully processed, check if we should continue
+                                # Continue processing if there might be PROCESSING messages ahead
                                 if current_status in [IncomingMessageStatus.PARSED, IncomingMessageStatus.NOT_REAL_ESTATE, IncomingMessageStatus.SPAM_FILTERED, IncomingMessageStatus.MEDIA_ONLY]:
-                                    logger.info("Found already processed message %s in channel %s, stopping catch-up for this channel", message.id, channel_id)
-                                    skipped_messages += 1
-                                    channel_skipped += 1
-                                    break  # Stop processing this channel, we've caught up
+                                    # Check if there are any messages with PROCESSING status in this channel
+                                    # If yes, continue processing to catch them
+                                    processing_count = await db.incoming_messages.count_documents({
+                                        "channel_id": message.chat_id,
+                                        "processing_status": IncomingMessageStatus.PROCESSING
+                                    })
+                                    
+                                    if processing_count > 0:
+                                        # There are PROCESSING messages, continue to process them
+                                        logger.info("Found already processed message %s, but %d messages in PROCESSING status, continuing catch-up", 
+                                                  message.id, processing_count)
+                                        skipped_messages += 1
+                                        channel_skipped += 1
+                                        continue  # Continue processing to catch PROCESSING messages
+                                    else:
+                                        # No PROCESSING messages, safe to stop
+                                        logger.info("Found already processed message %s in channel %s, stopping catch-up for this channel", message.id, channel_id)
+                                        skipped_messages += 1
+                                        channel_skipped += 1
+                                        break  # Stop processing this channel, we've caught up
                                 elif current_status == IncomingMessageStatus.ERROR:
                                     logger.info("Message %s had error status, reprocessing", message.id)
+                                    await self._process_message(message)
+                                    processed_messages += 1
+                                    channel_processed += 1
+                                elif current_status == IncomingMessageStatus.PROCESSING:
+                                    logger.info("Message %s has PROCESSING status, reprocessing (was interrupted)", message.id)
                                     await self._process_message(message)
                                     processed_messages += 1
                                     channel_processed += 1
@@ -438,6 +464,118 @@ class TelegramService:
 
         except Exception as e:
             logger.error("Error in catch-up loading from monitored channels: %s", e)
+
+    async def _reprocess_stuck_messages(self) -> None:
+        """Reprocess all messages stuck in PROCESSING or ERROR status after restart"""
+        try:
+            logger.info("Checking for stuck messages (PROCESSING or ERROR status)...")
+            
+            db = mongodb.get_database()
+            
+            # Find all messages in PROCESSING or ERROR status
+            stuck_messages = []
+            async for message_doc in db.incoming_messages.find({
+                "processing_status": {"$in": [IncomingMessageStatus.PROCESSING, IncomingMessageStatus.ERROR]}
+            }):
+                stuck_messages.append({
+                    "id": message_doc["id"],
+                    "channel_id": message_doc["channel_id"],
+                    "status": message_doc["processing_status"]
+                })
+            
+            if not stuck_messages:
+                logger.info("No stuck messages found")
+                return
+            
+            logger.info("Found %d stuck messages to reprocess", len(stuck_messages))
+            
+            processed_count = 0
+            error_count = 0
+            
+            # Process each stuck message
+            for msg_info in stuck_messages:
+                try:
+                    message_id = msg_info["id"]
+                    channel_id = msg_info["channel_id"]
+                    status = msg_info["status"]
+                    
+                    logger.info("Reprocessing stuck message %s from channel %s (status: %s)", 
+                               message_id, channel_id, status)
+                    
+                    # Try to get the message from Telegram
+                    if not self.client or not self.client.is_connected():
+                        logger.warning("Telegram client not connected, skipping message %s", message_id)
+                        continue
+                    
+                    try:
+                        # Get channel entity first
+                        try:
+                            channel_entity = await self.client.get_entity(channel_id)
+                        except Exception as e:
+                            logger.warning("Could not get channel entity for %s: %s, skipping message %s", channel_id, e, message_id)
+                            error_count += 1
+                            continue
+                        
+                        # Get message entity
+                        messages = await self.client.get_messages(channel_entity, ids=message_id)
+                        
+                        # Handle both single message and list of messages
+                        if isinstance(messages, list):
+                            if len(messages) == 0:
+                                message = None
+                            else:
+                                message = messages[0]
+                        else:
+                            message = messages
+                        
+                        if not message:
+                            logger.warning("Message %s not found in channel %s, marking as ERROR", message_id, channel_id)
+                            # Update status to ERROR if message not found
+                            await db.incoming_messages.update_one(
+                                {"id": message_id, "channel_id": channel_id},
+                                {
+                                    "$set": {
+                                        "processing_status": IncomingMessageStatus.ERROR,
+                                        "parsing_errors": [f"Message not found in channel after restart"],
+                                        "updated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            )
+                            error_count += 1
+                            continue
+                        
+                        # Reprocess the message
+                        await self._process_message(message, force=False)
+                        processed_count += 1
+                        logger.info("Successfully reprocessed stuck message %s", message_id)
+                        
+                    except Exception as e:
+                        logger.error("Error getting/reprocessing message %s: %s", message_id, e)
+                        error_count += 1
+                        # Update status to ERROR if reprocessing failed
+                        try:
+                            await db.incoming_messages.update_one(
+                                {"id": message_id, "channel_id": channel_id},
+                                {
+                                    "$set": {
+                                        "processing_status": IncomingMessageStatus.ERROR,
+                                        "parsing_errors": [f"Reprocessing error: {str(e)}"],
+                                        "updated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            )
+                        except Exception as update_error:
+                            logger.error("Error updating message %s status: %s", message_id, update_error)
+                
+                except Exception as e:
+                    logger.error("Error processing stuck message %s: %s", msg_info.get("id"), e)
+                    error_count += 1
+            
+            logger.info("Stuck messages reprocessing completed: processed %d, errors %d", 
+                       processed_count, error_count)
+            
+        except Exception as e:
+            logger.error("Error in reprocess_stuck_messages: %s", e)
 
     async def _load_recent_messages_from_channels(self, user_channels: Dict[int, List[Dict]], limit: int = 100) -> None:
         """Load recent messages from subscribed channels on startup with proper topic filtering"""
@@ -976,8 +1114,10 @@ class TelegramService:
             existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
 
             if existing_post:
-                # Check if we need to reprocess (e.g., if status is ERROR or force=True)
-                if not force and existing_post.get("processing_status") not in [IncomingMessageStatus.ERROR]:
+                # Check if we need to reprocess (e.g., if status is ERROR, PROCESSING, or force=True)
+                # PROCESSING status means message was interrupted during processing, should be reprocessed
+                existing_status = existing_post.get("processing_status")
+                if not force and existing_status not in [IncomingMessageStatus.ERROR, IncomingMessageStatus.PROCESSING]:
                     return
 
                 logger.info(
@@ -1346,7 +1486,10 @@ class TelegramService:
 
             # Send to user via notification service
             # Create inline keyboard with settings button
-            keyboard = [[InlineKeyboardButton("⚙️ Настроить фильтры", callback_data="open_settings")]]
+            keyboard = [[InlineKeyboardButton(
+                "⚙️ Настроить фильтры", 
+                web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}")
+            )]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             if self.notification_service:
