@@ -46,8 +46,8 @@ class PriceFilterService:
             price_filters = []
             async for doc in cursor:
                 logger.info("Found price filter: %s", doc)
-                # Remove _id field as it's not part of the model
-                doc.pop("_id", None)
+                # Map MongoDB _id to API-facing id
+                doc["id"] = str(doc.pop("_id"))
                 # Ensure required fields are present
                 if "is_active" not in doc:
                     doc["is_active"] = True
@@ -79,7 +79,7 @@ class PriceFilterService:
                 {"$set": update_data}
             )
             
-            if result.modified_count > 0:
+            if result.matched_count > 0:
                 logger.info("Updated price filter %s", price_filter_id)
                 return True
             else:

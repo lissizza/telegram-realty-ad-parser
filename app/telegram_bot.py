@@ -39,6 +39,7 @@ from app.bot.admin_callbacks import handle_admin_callback
 from app.bot.admin_decorators import is_admin
 
 logger = logging.getLogger(__name__)
+FILTERS_WEBAPP_VERSION = "20260213-1"
 
 
 class TelegramBot:
@@ -79,7 +80,9 @@ class TelegramBot:
             [
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
+                    web_app=WebAppInfo(
+                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}&v={FILTERS_WEBAPP_VERSION}"
+                    ),
                 )
             ],
             [
@@ -142,7 +145,9 @@ class TelegramBot:
             [
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}"),
+                    web_app=WebAppInfo(
+                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}&v={FILTERS_WEBAPP_VERSION}"
+                    ),
                 )
             ]
         ]
@@ -249,6 +254,11 @@ class TelegramBot:
             response += f"**Тип:** {real_estate_ad.property_type}\n"
             response += f"**Комнат:** {real_estate_ad.rooms_count}\n"
             response += f"**Площадь:** {real_estate_ad.area_sqm} кв.м\n"
+            if real_estate_ad.floor is not None:
+                if real_estate_ad.total_floors is not None:
+                    response += f"**Этаж:** {real_estate_ad.floor}/{real_estate_ad.total_floors}\n"
+                else:
+                    response += f"**Этаж:** {real_estate_ad.floor}\n"
             response += f"**Цена:** {real_estate_ad.price} {real_estate_ad.currency}\n"
             response += f"**Район:** {real_estate_ad.district}\n"
             response += f"**Уверенность:** {real_estate_ad.parsing_confidence:.2f}\n\n"

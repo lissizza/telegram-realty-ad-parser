@@ -7,6 +7,7 @@ from app.models.telegram import Currency
 class PriceFilter(BaseModel):
     """Model for price filtering criteria linked to a SimpleFilter"""
     
+    id: Optional[str] = Field(None, description="Price filter ID")
     filter_id: str = Field(..., description="ID of the parent SimpleFilter")
     min_price: Optional[float] = Field(None, ge=0, description="Minimum price")
     max_price: Optional[float] = Field(None, ge=0, description="Maximum price")
