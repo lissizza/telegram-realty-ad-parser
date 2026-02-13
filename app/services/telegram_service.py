@@ -1879,99 +1879,143 @@ class TelegramService:
     async def _check_filters_for_all_users(self, real_estate_ad: RealEstateAd, message: Message) -> None:
         """
         Check filters for ALL users and forward to matching users.
-        
+
+        Uses batch queries to avoid N+1 problem:
+        ~6 queries total instead of ~100+ for 30 filters.
+
         Note: Duplicate status is only used to skip LLM parsing. For users, duplicates
         are treated as regular new ads - they are sent if they match filters and haven't
         been sent for this specific incoming_message_id yet.
-        
-        Args:
-            real_estate_ad: The real estate ad to check
-            message: The incoming message (can be duplicate or new)
         """
         try:
             db = mongodb.get_database()
-            
-            # Get all active filters from all users
+
+            # Query 1: Get all active filters
             all_filters = await db.simple_filters.find({"is_active": True}).to_list(length=None)
-            
+
             if not all_filters:
                 logger.info("No active filters found for ad %s", message.id)
                 return
-            
+
             logger.info("Checking %d filters for ad %s (message_id=%s)", len(all_filters), real_estate_ad.original_post_id, message.id)
-            
-            # Get channel selection service
-            selection_service = UserChannelSelectionService()
-            
+
+            # Query 2: Find monitored channel ObjectId for this chat_id
+            normalized_channel_id = str(message.chat_id)
+            # Try both formats: raw chat_id and normalized
+            from app.utils.channel_id_utils import channel_id_to_string
+            normalized_str = channel_id_to_string(message.chat_id)
+
+            monitored_channel = await db.monitored_channels.find_one({
+                "channel_id": normalized_str,
+                "is_active": True
+            })
+
+            if not monitored_channel:
+                # Try with raw string format
+                monitored_channel = await db.monitored_channels.find_one({
+                    "channel_id": normalized_channel_id,
+                    "is_active": True
+                })
+
+            # Build set of user_ids who selected this channel
+            selected_user_ids = set()
+            if monitored_channel:
+                monitored_channel_id = str(monitored_channel["_id"])
+                # Query 3: Batch load all channel selections for this channel
+                selections_cursor = db.user_channel_selections.find({
+                    "channel_id": monitored_channel_id,
+                    "is_selected": True
+                })
+                async for sel in selections_cursor:
+                    selected_user_ids.add(sel["user_id"])
+            else:
+                logger.warning("Channel %s not found in monitored_channels, no users will match", message.chat_id)
+
+            # Collect all filter_ids for batch price filter loading
+            filter_ids = [str(f["_id"]) for f in all_filters]
+
+            # Query 4: Batch load all active price filters for all filter_ids
+            all_price_filters_docs = await db.price_filters.find({
+                "filter_id": {"$in": filter_ids},
+                "is_active": True
+            }).to_list(length=None)
+
+            # Group price filters by filter_id
+            from app.models.price_filter import PriceFilter
+            price_filters_by_id: Dict[str, list] = {}
+            for doc in all_price_filters_docs:
+                fid = doc["filter_id"]
+                doc_copy = dict(doc)
+                doc_copy["id"] = str(doc_copy.pop("_id"))
+                if "is_active" not in doc_copy:
+                    doc_copy["is_active"] = True
+                try:
+                    pf = PriceFilter(**doc_copy)
+                    price_filters_by_id.setdefault(fid, []).append(pf)
+                except Exception as e:
+                    logger.error("Validation error for price filter %s: %s", doc.get("_id"), e)
+
             # Get ad ID for checking if already sent
             ad_id = real_estate_ad.id if real_estate_ad.id else None
             if not ad_id:
-                # Try to get ad ID from database
                 existing_ad = await db.real_estate_ads.find_one({"original_post_id": real_estate_ad.original_post_id})
                 if existing_ad:
                     ad_id = str(existing_ad["_id"])
-            
+
+            # Query 5: Batch load all outgoing_posts for this ad+message to find already-sent
+            already_sent_users = set()
+            if ad_id:
+                sent_cursor = db.outgoing_posts.find({
+                    "real_estate_ad_id": ad_id,
+                    "incoming_message_id": message.id
+                })
+                async for sent_doc in sent_cursor:
+                    already_sent_users.add(sent_doc.get("sent_to"))
+
             if not ad_id:
                 logger.warning("Could not determine ad_id for ad %s, skipping duplicate check", real_estate_ad.original_post_id)
-            
-            # Check each filter
+
+            # Check each filter using in-memory data only
             for filter_doc in all_filters:
                 try:
-                    # Create SimpleFilter object
                     filter_obj = SimpleFilter(**filter_doc)
                     user_id = filter_obj.user_id
-                    
-                    # Check if user has selected this channel
-                    # Use normalized channel ID format
-                    is_channel_selected = await selection_service.is_channel_selected_by_user(user_id, message.chat_id)
-                    
-                    if not is_channel_selected:
+                    filter_id = str(filter_doc["_id"])
+
+                    # In-memory check: user selected this channel?
+                    if user_id not in selected_user_ids:
                         logger.debug("User %s has not selected channel %s, skipping filter '%s'", user_id, message.chat_id, filter_obj.name)
                         continue
-                    
-                    logger.debug("Checking filter '%s' (user %s) for ad %s", filter_obj.name, user_id, message.id)
-                    
-                    # Get price filters for this filter
-                    price_filter_service = PriceFilterService()
-                    filter_id = str(filter_doc["_id"])  # Use the _id from the database document
-                    price_filters = await price_filter_service.get_price_filters_by_filter_id(filter_id)
-                    
-                    # Check if this specific filter matches the ad
+
+                    # In-memory check: price filters match?
+                    price_filters = price_filters_by_id.get(filter_id, [])
                     if filter_obj.matches_with_price_filters(real_estate_ad, price_filters):
                         logger.info("Ad %s matches filter '%s' for user %s", message.id, filter_obj.name, user_id)
-                        
-                        # Check if this ad was already sent to this user for this specific incoming message
-                        # This prevents duplicate sends for the same incoming_message_id, but allows
-                        # sending the same ad when it appears as a duplicate (different incoming_message_id)
-                        if ad_id:
-                            already_sent = await db.outgoing_posts.find_one({
-                                "real_estate_ad_id": ad_id,
-                                "sent_to": str(user_id),
-                                "incoming_message_id": message.id
-                            })
-                            
-                            if already_sent:
-                                logger.info("Ad %s (message %s) already sent to user %s, skipping", ad_id, message.id, user_id)
-                                continue
-                        
-                        # Forward to user
+
+                        # In-memory check: already sent?
+                        if ad_id and str(user_id) in already_sent_users:
+                            logger.info("Ad %s (message %s) already sent to user %s, skipping", ad_id, message.id, user_id)
+                            continue
+
+                        # Forward to user (this is the only DB write per match)
                         await self._forward_post(message, real_estate_ad, filter_id, filter_obj.name, user_id)
                     else:
                         logger.debug("Ad %s does not match filter '%s' for user %s", message.id, filter_obj.name, user_id)
-                        
+
                 except Exception as e:
                     logger.error("Error checking filter %s for ad %s: %s", filter_doc.get("_id"), message.id, e)
                     continue
-            
-            # Update message status to PARSED only if not already DUPLICATE
-            # (duplicates should keep their DUPLICATE status)
-            existing_msg = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
-            if existing_msg and existing_msg.get("processing_status") != IncomingMessageStatus.DUPLICATE:
-                await db.incoming_messages.update_one(
-                    {"id": message.id, "channel_id": message.chat_id},
-                    {"$set": {"processing_status": IncomingMessageStatus.PARSED, "updated_at": message.date}},
-                )
-            
+
+            # Query 6: Update message status to PARSED only if not already DUPLICATE
+            await db.incoming_messages.update_one(
+                {
+                    "id": message.id,
+                    "channel_id": message.chat_id,
+                    "processing_status": {"$ne": IncomingMessageStatus.DUPLICATE}
+                },
+                {"$set": {"processing_status": IncomingMessageStatus.PARSED, "updated_at": message.date}},
+            )
+
         except Exception as e:
             logger.error("Error checking filters for all users: %s", e)
 
