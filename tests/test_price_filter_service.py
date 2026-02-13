@@ -108,7 +108,7 @@ class TestPriceFilterService:
     @pytest.mark.asyncio
     async def test_update_price_filter(self, service, mock_database):
         """Test updating a price filter"""
-        mock_database.price_filters.update_one.return_value.modified_count = 1
+        mock_database.price_filters.update_one.return_value.matched_count = 1
         
         update_data = {"min_price": 200000.0, "is_active": False}
         result = await service.update_price_filter("507f1f77bcf86cd799439011", update_data)  # Valid ObjectId
@@ -124,7 +124,7 @@ class TestPriceFilterService:
     @pytest.mark.asyncio
     async def test_update_price_filter_not_found(self, service, mock_database):
         """Test updating a non-existent price filter"""
-        mock_database.price_filters.update_one.return_value.modified_count = 0
+        mock_database.price_filters.update_one.return_value.matched_count = 0
         
         update_data = {"min_price": 200000.0}
         result = await service.update_price_filter("507f1f77bcf86cd799439012", update_data)  # Valid ObjectId

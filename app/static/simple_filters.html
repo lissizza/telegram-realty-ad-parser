@@ -830,95 +830,27 @@
         function setupMobileCompatibility() {
             // Function to setup checkbox handlers
             function setupCheckboxHandlers(checkbox) {
-                // Remove existing listeners to avoid duplicates
-                checkbox.removeEventListener('touchstart', handleTouchStart);
-                checkbox.removeEventListener('touchend', handleTouchEnd);
-                checkbox.removeEventListener('click', handleClick);
-                
-                // Add touch event handlers for mobile
-                checkbox.addEventListener('touchstart', handleTouchStart);
-                checkbox.addEventListener('touchend', handleTouchEnd);
-                checkbox.addEventListener('click', handleClick);
-                
                 // Make checkbox more touch-friendly
                 checkbox.style.minWidth = '20px';
                 checkbox.style.minHeight = '20px';
                 checkbox.style.cursor = 'pointer';
             }
             
-            function handleTouchStart(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            function handleTouchEnd(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Toggle checkbox state
-                this.checked = !this.checked;
-                
-                // Trigger change event
-                const changeEvent = new Event('change', { bubbles: true });
-                this.dispatchEvent(changeEvent);
-                
-                // Force visual update
-                this.style.transform = 'scale(1.1)';
-                setTimeout(() => {
-                    this.style.transform = 'scale(1)';
-                }, 100);
-            }
-            
-            function handleClick(e) {
-                // Prevent default behavior that might not work on mobile
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Toggle checkbox state
-                this.checked = !this.checked;
-                
-                // Trigger change event
-                const changeEvent = new Event('change', { bubbles: true });
-                this.dispatchEvent(changeEvent);
-            }
-            
             // Setup initial checkboxes
             const checkboxes = document.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(setupCheckboxHandlers);
             
-            // Setup labels
-            function setupLabelHandlers(label) {
-                label.removeEventListener('touchstart', handleLabelTouchStart);
-                label.removeEventListener('touchend', handleLabelTouchEnd);
-                
-                label.addEventListener('touchstart', handleLabelTouchStart);
-                label.addEventListener('touchend', handleLabelTouchEnd);
-                
+            // Apply pointer UX styles to labels bound to checkboxes.
+            // Toggling is handled natively by browser to avoid double-toggle issues.
+            const labels = Array.from(document.querySelectorAll('label[for]')).filter(label => {
+                const target = document.getElementById(label.getAttribute('for'));
+                return target && target.type === 'checkbox';
+            });
+            labels.forEach(label => {
                 label.style.cursor = 'pointer';
                 label.style.userSelect = 'none';
                 label.style.webkitUserSelect = 'none';
-            }
-            
-            function handleLabelTouchStart(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            function handleLabelTouchEnd(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Find associated checkbox and toggle it
-                const checkbox = document.getElementById(this.getAttribute('for'));
-                if (checkbox) {
-                    checkbox.checked = !checkbox.checked;
-                    const changeEvent = new Event('change', { bubbles: true });
-                    checkbox.dispatchEvent(changeEvent);
-                }
-            }
-            
-            const labels = document.querySelectorAll('label');
-            labels.forEach(setupLabelHandlers);
+            });
             
             // Make setupCheckboxHandlers globally available for dynamic content
             window.setupCheckboxHandlers = setupCheckboxHandlers;

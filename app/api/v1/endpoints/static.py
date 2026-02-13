@@ -8,6 +8,11 @@ router = APIRouter()
 
 # Get the static files directory
 STATIC_DIR = Path(__file__).parent.parent.parent.parent / "static"
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 @router.get("/search-settings")
 async def get_search_settings_page():
@@ -18,7 +23,7 @@ async def get_search_settings_page():
 @router.get("/simple-filters")
 async def get_simple_filters_page():
     """Serve the simple filters HTML page"""
-    return FileResponse(STATIC_DIR / "simple_filters.html")
+    return FileResponse(STATIC_DIR / "simple_filters.html", headers=NO_CACHE_HEADERS)
 
 
 @router.get("/channel-selection")
@@ -31,6 +36,12 @@ async def get_channel_selection_page():
 async def get_admin_statistics_page():
     """Serve the admin statistics HTML page"""
     return FileResponse(STATIC_DIR / "admin_statistics.html")
+
+
+@router.get("/llm-config-management")
+async def get_llm_config_management_page():
+    """Serve the LLM config management HTML page"""
+    return FileResponse(STATIC_DIR / "llm_config_management.html")
 
 @router.get("/")
 async def get_static_files():
