@@ -9,6 +9,7 @@ information from unstructured text.
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -23,6 +24,9 @@ from app.exceptions import LLMQuotaExceededError
 from app.models.llm_cost import LLMCost
 from app.models.telegram import PropertyType, RealEstateAd, RentalType
 from app.services.admin_notification_service import admin_notification_service
+from app.services.llm_quota_service import llm_quota_service
+from app.services.llm_config_service import llm_config_service
+from app.services.encryption_service import encryption_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,26 +35,18 @@ class LLMService:
     """Service for LLM-based real estate ad parsing with multiple providers"""
 
     def __init__(self) -> None:
-        self.provider = str(settings.LLM_PROVIDER).lower()
-        self.model = str(settings.LLM_MODEL)
-        self.api_key = str(settings.LLM_API_KEY)
-        self.base_url = settings.LLM_BASE_URL
-        self.max_tokens = settings.LLM_MAX_TOKENS
-        self.temperature = settings.LLM_TEMPERATURE
-
+        # Try to load active config from database first, fallback to settings
+        self._load_config()
+        
+        # Warn if using deprecated GLM-4-Plus model
+        if self.provider == "zai" and self.model.lower() in ["glm-4-plus", "glm-4.plus", "glm-4-plus"]:
+            logger.warning("Model %s is deprecated or not supported. Please use glm-4.6, glm-4.5, or glm-4.5-air instead", self.model)
+        
         # Initialize client based on provider
-        self.client: Optional[Any] = None
-        if self.provider == "openai":
-            self.client = AsyncOpenAI(api_key=self.api_key)
-        elif self.provider == "anthropic":
-            self.client = AsyncAnthropic(api_key=self.api_key)
-        elif self.provider == "local":
-            # For local models (Ollama, etc.)
-            self.client = None  # Will use httpx directly
-        elif self.provider == "mock":
-            self.client = None  # Mock implementation
+        self._initialize_client()
 
         # LLM pricing (per 1K tokens)
+        # Z.AI pricing: approximate values (adjust based on actual pricing)
         self.pricing = {
             "gpt-4": {"input": 0.03, "output": 0.06},
             "gpt-4-turbo": {"input": 0.01, "output": 0.03},
@@ -58,7 +54,108 @@ class LLMService:
             "claude-3-opus": {"input": 0.015, "output": 0.075},
             "claude-3-sonnet": {"input": 0.003, "output": 0.015},
             "claude-3-haiku": {"input": 0.00025, "output": 0.00125},
+            # Z.AI GLM models (approximate pricing - adjust based on actual Z.AI pricing)
+            # Supported models for GLM Coding Plan: glm-4.6, glm-4.5, glm-4.5-air
+            # Note: GLM-4-Plus is not supported - use glm-4.6 instead
+            "glm-4.6": {"input": 0.001, "output": 0.002},
+            "glm-4-6": {"input": 0.001, "output": 0.002},
+            "glm-4.5": {"input": 0.001, "output": 0.002},
+            "glm-4-5": {"input": 0.001, "output": 0.002},
+            "glm-4.5-air": {"input": 0.001, "output": 0.002},
+            "glm-4-5-air": {"input": 0.001, "output": 0.002},
+            "glm-4-plus": {"input": 0.001, "output": 0.002},  # Deprecated - use glm-4.6
+            "GLM-4-Plus": {"input": 0.001, "output": 0.002},  # Deprecated - use glm-4.6
+            "glm-4-32b-0414-128k": {"input": 0.001, "output": 0.002},
         }
+    
+    def _load_config(self) -> None:
+        """Load LLM configuration from database or fallback to settings"""
+        try:
+            # Try to get active config from database (synchronous check)
+            # Note: This is a best-effort check. For async operations, use reload_config()
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is running, we can't use it synchronously
+                    # Fallback to settings
+                    self._load_from_settings()
+                    return
+            except RuntimeError:
+                # No event loop, create a new one
+                pass
+            
+            # Try to get active config (only if we can run async code)
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                config = loop.run_until_complete(llm_config_service.get_active_config(include_key=True))
+                loop.close()
+                
+                if config:
+                    self.provider = str(config["provider"]).lower()
+                    self.model = str(config["model"])
+                    self.api_key = str(config["api_key"])
+                    self.base_url = config.get("base_url")
+                    self.max_tokens = config.get("max_tokens", 1000)
+                    self.temperature = config.get("temperature", 0.1)
+                    logger.info("Loaded LLM config from database: %s (%s)", config["name"], config["model"])
+                    return
+            except Exception as e:
+                logger.debug("Could not load config from database (will use settings): %s", e)
+            
+            # Fallback to settings
+            self._load_from_settings()
+        except Exception as e:
+            logger.warning("Error loading LLM config, using settings: %s", e)
+            self._load_from_settings()
+    
+    def _load_from_settings(self) -> None:
+        """Load configuration from settings"""
+        self.provider = str(settings.LLM_PROVIDER).lower()
+        self.model = str(settings.LLM_MODEL)
+        self.api_key = str(settings.LLM_API_KEY)
+        self.base_url = settings.LLM_BASE_URL
+        self.max_tokens = settings.LLM_MAX_TOKENS
+        self.temperature = settings.LLM_TEMPERATURE
+        logger.info("Loaded LLM config from settings: provider=%s, model=%s", self.provider, self.model)
+    
+    async def reload_config(self) -> None:
+        """Reload LLM configuration from database (async)"""
+        try:
+            config = await llm_config_service.get_active_config(include_key=True)
+            if config:
+                self.provider = str(config["provider"]).lower()
+                self.model = str(config["model"])
+                self.api_key = str(config["api_key"])
+                self.base_url = config.get("base_url")
+                self.max_tokens = config.get("max_tokens", 1000)
+                self.temperature = config.get("temperature", 0.1)
+                self._initialize_client()
+                logger.info("Reloaded LLM config from database: %s (%s)", config["name"], config["model"])
+            else:
+                logger.warning("No active config in database, keeping current settings")
+        except Exception as e:
+            logger.error("Error reloading LLM config: %s", e)
+    
+    def _initialize_client(self) -> None:
+        """Initialize LLM client based on current provider settings"""
+        self.client: Optional[Any] = None
+        if self.provider == "openai":
+            self.client = AsyncOpenAI(api_key=self.api_key)
+        elif self.provider == "zai":
+            # Z.AI supports OpenAI-compatible protocol
+            # Use base_url from config or default Z.AI endpoint
+            zai_base_url = self.base_url or "https://api.z.ai/api/paas/v4"
+            self.client = AsyncOpenAI(api_key=self.api_key, base_url=zai_base_url)
+            logger.info("Initialized Z.AI client with base_url: %s, model: %s", zai_base_url, self.model)
+        elif self.provider == "anthropic":
+            self.client = AsyncAnthropic(api_key=self.api_key)
+        elif self.provider == "local":
+            # For local models (Ollama, etc.)
+            self.client = None  # Will use httpx directly
+        elif self.provider == "mock":
+            self.client = None  # Mock implementation
 
     async def parse_with_llm(
         self,
@@ -74,7 +171,11 @@ class LLMService:
             prompt = self._create_parsing_prompt(text)
 
             # Call LLM (may raise exception for quota errors)
+            llm_start_time = time.time()
             llm_result = await self._call_llm(prompt)
+            llm_response_time = time.time() - llm_start_time
+            
+            logger.info("LLM API call completed for message %s in %.2f seconds", post_id, llm_response_time)
             if not llm_result:
                 return None
 
@@ -113,18 +214,76 @@ class LLMService:
             return ad
 
         except (OpenAIRateLimitError, AnthropicRateLimitError) as e:
-            # LLM quota/rate limit exceeded (both providers)
-            provider = "openai" if isinstance(e, OpenAIRateLimitError) else "anthropic"
-            logger.error("LLM quota exceeded while parsing message %s (provider: %s): %s", post_id, provider, e)
+            # LLM quota/rate limit exceeded (OpenAI, Z.AI, or Anthropic)
+            if isinstance(e, OpenAIRateLimitError):
+                provider = "zai" if self.provider == "zai" else "openai"
+            else:
+                provider = "anthropic"
+            error_str = str(e).lower()
             
-            # Notify super admins
-            try:
-                asyncio.create_task(admin_notification_service.notify_quota_exceeded(str(e)))
-            except Exception as notify_error:
-                logger.error("Error creating notification task: %s", notify_error)
+            # Check error type: quota (insufficient balance) vs concurrency/rate limit
+            is_quota_error = False
+            is_concurrency_error = False
             
-            # Raise custom exception to be handled by caller
-            raise LLMQuotaExceededError(str(e), provider=provider, original_error=e)
+            # Check error structure for OpenAI/Z.AI
+            if isinstance(e, OpenAIRateLimitError):
+                # Try to extract JSON from error message
+                json_match = re.search(r'\{.*\}', str(e))
+                if json_match:
+                    try:
+                        error_data = json.loads(json_match.group())
+                        error_info = error_data.get('error', {})
+                        error_type = error_info.get('type', '').lower()
+                        error_code = str(error_info.get('code', '')).lower()
+                        error_message = error_info.get('message', '').lower()
+                        
+                        # Check for concurrency limit (Z.AI specific error code 1302)
+                        if error_code == '1302' or 'high concurrency' in error_message or 'concurrency' in error_message:
+                            is_concurrency_error = True
+                        # Check for quota error
+                        elif error_type == 'insufficient_quota' or error_code == 'insufficient_quota':
+                            is_quota_error = True
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                
+                # Fallback string checks
+                if not is_quota_error and not is_concurrency_error:
+                    if '1302' in str(e) or 'high concurrency' in error_str or 'concurrency' in error_str:
+                        is_concurrency_error = True
+                    elif "insufficient_quota" in error_str or ("'type': 'insufficient_quota'" in str(e)) or ("'code': 'insufficient_quota'" in str(e)):
+                        is_quota_error = True
+            else:
+                # Anthropic - check string
+                is_quota_error = (
+                    "insufficient_quota" in error_str or
+                    ("quota" in error_str and "rate" not in error_str) or
+                    "billing" in error_str or
+                    "payment" in error_str
+                )
+            
+            if is_quota_error:
+                # Quota exceeded (no balance) - stop processing
+                logger.error("LLM quota exceeded (insufficient balance) while parsing message %s (provider: %s): %s", post_id, provider, e)
+                llm_quota_service.set_quota_exceeded()
+                
+                # Notify super admins
+                try:
+                    asyncio.create_task(admin_notification_service.notify_quota_exceeded(str(e)))
+                except Exception as notify_error:
+                    logger.error("Error creating notification task: %s", notify_error)
+                
+                # Raise custom exception with quota flag
+                raise LLMQuotaExceededError(str(e), provider=provider, original_error=e, is_quota=True)
+            elif is_concurrency_error:
+                # Concurrency limit exceeded - temporary, will retry
+                logger.warning("LLM concurrency limit exceeded while parsing message %s (provider: %s): %s. Will retry with backoff.", post_id, provider, e)
+                # Raise custom exception with concurrency flag
+                raise LLMQuotaExceededError(str(e), provider=provider, original_error=e, is_concurrency=True)
+            else:
+                # Generic rate limit error - temporary, will retry
+                logger.warning("LLM rate limit hit while parsing message %s (provider: %s): %s. Will retry later.", post_id, provider, e)
+                # Raise generic rate limit exception
+                raise LLMQuotaExceededError(str(e), provider=provider, original_error=e, is_rate_limit=True)
         except (OpenAIAPIError, Exception) as e:
             # Other errors (API errors, parsing errors, etc.)
             logger.error("Error parsing with LLM: %s", e)
@@ -132,270 +291,59 @@ class LLMService:
 
     def _create_parsing_prompt(self, text: str) -> str:
         """Create prompt for LLM parsing"""
-        return f"""You are a real estate listing parser for Russian Telegram posts.
-Extract structured information into JSON format.
+        return f"""Parse real estate ad from Russian/Armenian Telegram post.
 
-INSTRUCTIONS:
-1. Analyze if message is genuine real estate listing OFFERING property for rent/sale
-2. Messages about SEARCHING for property should be marked as is_real_estate: false
-3. Extract all available parameters using context clues
-4. Handle language variations and informal writing
-5. Use null for missing data, don't guess
-6. Return confidence score based on extraction certainty
+IMPORTANT: Return ONLY valid JSON, no explanations or markdown.
 
-IMPORTANT CLASSIFICATION RULES:
-- OFFER messages: "сдаю", "сдам", "продаю", "предлагаю", "сдается", "продается" = REAL ESTATE
-- SEARCH messages: "ищу", "сниму", "нужна", "требуется", "ищем", "нужен" = NOT REAL ESTATE
-- If message is about finding/buying/renting property, mark is_real_estate: false
-- Only messages offering property for rent/sale should be marked as real estate
+CLASSIFICATION:
+- OFFER (сдаю, сдается, продаю, продается) → is_real_estate: true
+- SEARCH (ищу, сниму, нужна) → is_real_estate: false
 
-RUSSIAN TERMS:
-Rent: сдаю, сдам, сдается, аренда, снять, в аренду
-Sale: продаю, продам, продается, купить, продажа
-Want rent: сниму, ищу, нужна, требуется
-Apartment: квартира, кв, квартиру
-Room: комната, ком, комнату
-House: дом, коттедж, таунхаус
-Studio: студия, однушка
-Commercial: офис, магазин, склад
-Room counts: 1к, 1-к, однокомнатная, однушка, студия, 2к, 2-к, двухкомнатная, двушка, 3к, трешка, 4к
-Floor info: X/Y этаж, X/Y этаж, на X этаже, X-й этаж (X = current floor, Y = total floors)
-Long-term: долгосрочно, долгосрок, на длительный срок
-Short-term: посуточно, на сутки, краткосрок, суточно
+KEY RULES:
+- "X/Y этаж" = floor X of Y total (NOT rooms)
+- Studio (студия, однушка) = 1 room
+- Use null for missing data
 
-IMPORTANT:
-- "3/8 этаж" means floor 3 of 8 total floors, NOT 3 rooms
-- "X/Y этаж" format is ALWAYS about floors, never rooms
-- STUDIO APARTMENTS: "студия", "квартира-студия", "однушка" ALWAYS means 1 room
-- Count rooms when explicitly mentioned: "2к", "двушка", "3 комнаты", "студия", etc.
-- If only floor info is given without room count, set rooms_count to null
-- Studio apartments are 1-room apartments, not separate room type
-
-JSON STRUCTURE:
-{{
-  "is_real_estate": boolean,
-  "parsing_confidence": number (0.0-1.0),
-  "property_type": string ("apartment"/"room"/"house"/"hotel_room"/null),
-  "rental_type": string ("long_term"/"daily"/null),
-  "rooms_count": number (null if unknown),
-  "area_sqm": number (null if unknown),
-  "price": number (null if unknown),
-  "currency": string ("AMD"/"USD"/"RUB"/"EUR"/"GBP"/null),
-  "city": string (null if unknown),
-  "district": string (null if unknown),
-  "address": string (null if unknown),
-  "contacts": array of strings (null if unknown),
-  "has_balcony": boolean (null if unknown),
-  "has_air_conditioning": boolean (null if unknown),
-  "has_internet": boolean (null if unknown),
-  "has_furniture": boolean (null if unknown),
-  "has_parking": boolean (null if unknown),
-  "has_garden": boolean (null if unknown),
-  "has_pool": boolean (null if unknown),
-  "has_elevator": boolean (null if unknown),
-  "pets_allowed": boolean (null if unknown),
-  "utilities_included": boolean (null if unknown),
-  "floor": number (null if unknown),
-  "total_floors": number (null if unknown),
-  "additional_notes": string (null if unknown)
-}}
-
-EXAMPLES:
-
-Example 1 (with room count):
-Input: "Сдаю 2к квартиру, 5/9 этаж, 55кв.м, Москва, район Измайлово, 45000₽/мес, мебель, без животных"
-Output:
-{{
-  "is_real_estate": true,
-  "parsing_confidence": 0.95,
-  "property_type": "apartment",
-  "rental_type": "long_term",
-  "rooms_count": 2,
-  "area_sqm": 55,
-  "price": 45000,
-  "currency": "RUB",
-  "district": "Измайлово",
-  "address": null,
-  "contacts": null,
-  "has_balcony": null,
-  "has_air_conditioning": null,
-  "has_internet": null,
-  "has_furniture": true,
-  "has_parking": null,
-  "has_garden": null,
-  "has_pool": null,
-  "has_elevator": null,
-  "pets_allowed": false,
-  "utilities_included": null,
-  "floor": 5,
-  "total_floors": 9,
-  "city": "Москва",
-  "additional_notes": null
-}}
-
-Example 2 (floor info only, no room count):
-Input: "Рубен Севака 26, 3/8 этаж, 500.000драм, Без комиссии"
-Output:
-{{
-  "is_real_estate": true,
-  "parsing_confidence": 0.8,
-  "property_type": "apartment",
-  "rental_type": "long_term",
-  "rooms_count": null,
-  "area_sqm": null,
-  "price": 500000,
-  "currency": "AMD",
-  "district": null,
-  "address": "Рубен Севака 26",
-  "contacts": null,
-  "has_balcony": null,
-  "has_air_conditioning": null,
-  "has_internet": null,
-  "has_furniture": null,
-  "has_parking": null,
-  "has_garden": null,
-  "has_pool": null,
-  "has_elevator": null,
-  "pets_allowed": null,
-  "utilities_included": null,
-  "floor": 3,
-  "total_floors": 8,
-  "city": null,
-  "additional_notes": "Only floor information provided (3/8), no room count mentioned"
-}}
-
-Example 3 (Yerevan address parsing):
-Input: "Адрес: Маштоц, Кентрон, Ереван"
-Output:
+REQUIRED JSON FORMAT:
 {{
   "is_real_estate": true,
   "parsing_confidence": 0.9,
   "property_type": "apartment",
   "rental_type": "long_term",
-  "rooms_count": null,
-  "area_sqm": null,
-  "price": null,
-  "currency": null,
+  "rooms_count": 2,
+  "area_sqm": 55.0,
+  "price": 45000,
+  "currency": "AMD",
+  "city": "Ереван",
   "district": "Кентрон",
-  "address": "улица Маштоца",
-  "contacts": null,
-  "has_balcony": null,
+  "address": "улица Маштоца 25",
+  "contacts": ["@username"],
+  "has_balcony": true,
   "has_air_conditioning": null,
-  "has_internet": null,
-  "has_furniture": null,
+  "has_internet": true,
+  "has_furniture": true,
   "has_parking": null,
   "has_garden": null,
   "has_pool": null,
-  "has_elevator": null,
-  "pets_allowed": null,
+  "has_elevator": true,
+  "pets_allowed": false,
   "utilities_included": null,
-  "floor": null,
-  "total_floors": null,
-  "city": "Ереван",
+  "floor": 5,
+  "total_floors": 9,
   "additional_notes": null
 }}
 
-Example 4 (Studio apartment - 1 room):
-Input: "Сдается квартира-студия в новом апартаментном комплексе в Арабкире. Адрес: улица Керу 17. Цена: 170 000 ֏ в месяц (плюс коммунальные услуги). Площадь: 25 кв. м."
-Output:
-{{
-  "is_real_estate": true,
-  "parsing_confidence": 0.95,
-  "property_type": "apartment",
-  "rental_type": "long_term",
-  "rooms_count": 1,
-  "area_sqm": 25,
-  "price": 170000,
-  "currency": "AMD",
-  "district": "Арабкир",
-  "address": "улица Керу 17",
-  "contacts": null,
-  "has_balcony": null,
-  "has_air_conditioning": null,
-  "has_internet": null,
-  "has_furniture": null,
-  "has_parking": null,
-  "has_garden": null,
-  "has_pool": null,
-  "has_elevator": null,
-  "pets_allowed": null,
-  "utilities_included": false,
-  "floor": null,
-  "total_floors": null,
-  "city": "Ереван",
-  "additional_notes": "Studio apartment is treated as 1-room apartment"
-}}
+TEXT TO PARSE:
+{text}
 
-Example 5 (SEARCH message - should be false):
-Input: "Здравствуйте. Ищем квартиру, бюджет до 150 000. Для молодой пары. Хорошая транспортная развязка. Желательно Ереван, но можно Абовян. По возможности без предоплаты и комиссий."
-Output:
-{{
-  "is_real_estate": false,
-  "parsing_confidence": 0.0,
-  "property_type": null,
-  "rental_type": null,
-  "rooms_count": null,
-  "area_sqm": null,
-  "price": null,
-  "currency": null,
-  "city": null,
-  "district": null,
-  "address": null,
-  "contacts": null,
-  "has_balcony": null,
-  "has_air_conditioning": null,
-  "has_internet": null,
-  "has_furniture": null,
-  "has_parking": null,
-  "has_garden": null,
-  "has_pool": null,
-  "has_elevator": null,
-  "pets_allowed": null,
-  "utilities_included": null,
-  "floor": null,
-  "total_floors": null,
-  "additional_notes": "This is a search request, not an offer. Person is looking for an apartment to rent."
-}}
-
-EXTRACTION RULES:
-- If information is not available, use null
-- For boolean fields, use true/false
-- For arrays, use empty array [] if no data
-- Extract phone numbers with country code if available, otherwise add appropriate country code based
- on city/address context
-- Extract Telegram usernames as @username
-- For districts, use standard Yerevan district names (Кентрон, Арабкир, Аван, Нор-Норк, Эребуни, Шенгавит, Давидашен, Ачапняк, Норк-Мараш, Канакер-Зейтун, Малатия-Себастия, Норк-Мараш)
-- For city, extract main city name (Ереван, Москва, Санкт-Петербург, etc.)
-- For address, extract street names, building numbers, metro stations
-- IMPORTANT: For Yerevan addresses, parse format "улица, район, город" correctly:
-  * "Маштоц, Кентрон, Ереван" = address: "улица Маштоца", district: "Кентрон", city: "Ереван"
-  * "Абовяна 15, Кентрон, Ереван" = address: "улица Абовяна 15", district: "Кентрон", city: "Ереван"
-  * "Туманяна 25, Арабкир, Ереван" = address: "улица Туманяна 25", district: "Арабкир", city: "Ереван"
-
-NOTES:
-- Mark is_real_estate false for spam, jobs, services
-- Extract prices with currency symbols or words like рублей, тысяч, драм, долларов, евро, фунтов
-- Recognize metro stations and street names in addresses
-- Lower confidence for ambiguous listings
-- Handle creative abbreviations and informal language
-- For ambiguous or unclear information, document your reasoning in additional_notes
-- If multiple prices are mentioned (e.g., monthly vs yearly), choose the most relevant one and note the ambiguity
- in additional_notes
-- If room count is unclear or could be interpreted differently, explain in additional_notes
-- For any parsing decisions that might be controversial, add explanation to additional_notes
-- ADDRESS PARSING: For Yerevan addresses, always parse "улица, район, город" format correctly:
-  * First part = street name (add "улица" prefix if not present)
-  * Second part = district (use standard district names)
-  * Third part = city (usually "Ереван")
-  * Example: "Маштоц, Кентрон, Ереван" → address: "улица Маштоца", district: "Кентрон", city: "Ереван"
-
-Analyze this real estate text and return JSON:
-
-{text}"""
+Return ONLY the JSON object, no other text:"""
 
     async def _call_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
         """Call LLM API based on provider - may raise RateLimitError"""
         if self.provider == "openai":
+            return await self._call_openai(prompt)
+        if self.provider == "zai":
+            # Z.AI uses OpenAI-compatible protocol, so we can use the same method
             return await self._call_openai(prompt)
         if self.provider == "anthropic":
             return await self._call_anthropic(prompt)
@@ -407,31 +355,69 @@ Analyze this real estate text and return JSON:
         return None
 
     async def _call_openai(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """Call OpenAI API - raises exceptions on errors"""
+        """Call OpenAI-compatible API (OpenAI or Z.AI) - raises exceptions on errors"""
         if not self.client or not hasattr(self.client, "chat"):
-            logger.error("OpenAI client not properly initialized")
+            provider_name = "Z.AI" if self.provider == "zai" else "OpenAI"
+            logger.error("%s client not properly initialized", provider_name)
             return None
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert at analyzing real estate advertisements "
-                    "in Armenian and Russian languages.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-        )
+        provider_name = "Z.AI" if self.provider == "zai" else "OpenAI"
+        
+        # Log prompt size for diagnostics
+        prompt_chars = len(prompt)
+        prompt_words = len(prompt.split())
+        logger.debug("Calling %s API: model=%s, prompt_size=%d chars (%d words), max_tokens=%d", 
+                    provider_name, self.model, prompt_chars, prompt_words, self.max_tokens)
+        
+        api_start_time = time.time()
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert at analyzing real estate advertisements "
+                            "in Armenian and Russian languages.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                ),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("%s API call timed out after 60 seconds for model: %s", provider_name, self.model)
+            return None
 
+        api_response_time = time.time() - api_start_time
+        
         content = response.choices[0].message.content
         usage = response.usage
 
         if not usage:
-            logger.error("No usage information in OpenAI response")
+            logger.error("No usage information in %s response", provider_name)
             return None
+        
+        # Log detailed timing and token usage
+        logger.info(
+            "%s API call: %.2fs | tokens: %d prompt + %d completion = %d total | model: %s",
+            provider_name,
+            api_response_time,
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            self.model
+        )
+        
+        # Check if response has rate limit info (some providers include it)
+        if hasattr(response, '_headers'):
+            headers = response._headers
+            if 'x-ratelimit-remaining' in headers:
+                logger.info("Rate limit remaining: %s", headers.get('x-ratelimit-remaining'))
+            if 'x-ratelimit-limit' in headers:
+                logger.info("Rate limit total: %s", headers.get('x-ratelimit-limit'))
 
         return {
             "response": content,
@@ -442,6 +428,7 @@ Analyze this real estate text and return JSON:
                 "cost_usd": self._calculate_cost(usage.prompt_tokens, usage.completion_tokens),
                 "model_name": self.model,
             },
+            "response_time_seconds": api_response_time,
         }
 
     async def _call_anthropic(self, prompt: str) -> Optional[Dict[str, Any]]:
@@ -450,12 +437,22 @@ Analyze this real estate text and return JSON:
             logger.error("Anthropic client not properly initialized")
             return None
 
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        api_start_time = time.time()
+        try:
+            response = await asyncio.wait_for(
+                self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Anthropic API call timed out after 60 seconds for model: %s", self.model)
+            return None
+        api_response_time = time.time() - api_start_time
+        logger.debug("Anthropic API responded in %.2f seconds", api_response_time)
 
         content = response.content[0].text
         usage = response.usage
@@ -473,6 +470,7 @@ Analyze this real estate text and return JSON:
                 "cost_usd": self._calculate_cost(usage.input_tokens, usage.output_tokens),
                 "model_name": self.model,
             },
+            "response_time_seconds": api_response_time,
         }
 
     async def _call_local(self, prompt: str) -> Optional[Dict[str, Any]]:
@@ -483,6 +481,7 @@ Analyze this real estate text and return JSON:
                 return None
 
             async with httpx.AsyncClient() as client:
+                api_start_time = time.time()
                 response = await client.post(
                     f"{self.base_url}/v1/chat/completions",
                     json={
@@ -500,6 +499,9 @@ Analyze this real estate text and return JSON:
                     },
                     timeout=60.0,
                 )
+                api_response_time = time.time() - api_start_time
+                logger.debug("Local LLM API responded in %.2f seconds", api_response_time)
+                
                 response.raise_for_status()
                 data = response.json()
 
@@ -515,6 +517,7 @@ Analyze this real estate text and return JSON:
                         "cost_usd": 0.0,  # Local models are free
                         "model_name": self.model,
                     },
+                    "response_time_seconds": api_response_time,
                 }
         except Exception as e:
             logger.error("Error calling local LLM: %s", e)
@@ -742,12 +745,20 @@ Analyze this real estate text and return JSON:
     def _parse_llm_response(self, response: str) -> Optional[Dict[str, Any]]:
         """Parse LLM response JSON"""
         try:
+            # Log raw response for debugging
+            logger.debug("Raw LLM response (first 500 chars): %s", response[:500] if response else "EMPTY")
+            
             # Clean response (remove markdown if present)
             response = response.strip()
+            if not response:
+                logger.error("Empty LLM response received")
+                return None
+                
             if response.startswith("```json"):
                 response = response[7:]
             if response.endswith("```"):
                 response = response[:-3]
+            response = response.strip()
 
             # Parse JSON
             data = json.loads(response)
@@ -762,6 +773,9 @@ Analyze this real estate text and return JSON:
 
             return parsed_data
 
+        except json.JSONDecodeError as e:
+            logger.error("JSON decode error: %s. Response (first 200 chars): %s", e, response[:200] if response else "EMPTY")
+            return None
         except Exception as e:
             logger.error("Error parsing LLM response: %s", e)
             return None
@@ -824,17 +838,29 @@ Analyze this real estate text and return JSON:
         else:
             result["area_sqm"] = None
 
-        # Price and currency - direct mapping
+        # Price and currency - direct mapping with validation
         if data.get("price") is not None:
             try:
                 result["price"] = float(data["price"])
-                result["currency"] = data.get("currency")
+                # Validate currency if provided, default to AMD if not specified or invalid
+                currency_value = data.get("currency")
+                from app.models.telegram import Currency
+                if currency_value is not None:
+                    try:
+                        # Try to convert to Currency enum
+                        result["currency"] = Currency(currency_value)
+                    except (ValueError, TypeError):
+                        # Invalid currency value, use default AMD
+                        result["currency"] = Currency.AMD
+                else:
+                    # Currency not specified, use default AMD
+                    result["currency"] = Currency.AMD
             except (ValueError, TypeError):
                 result["price"] = None
-                result["currency"] = None
+                result["currency"] = Currency.AMD  # Default to AMD even if price parsing failed
         else:
             result["price"] = None
-            result["currency"] = None
+            result["currency"] = Currency.AMD  # Default to AMD if no price
 
         # String fields
         for field in ["district", "address", "city", "additional_notes"]:

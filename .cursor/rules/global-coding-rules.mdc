@@ -40,7 +40,6 @@ alwaysApply: true
 ## DRY Principle (Don't Repeat Yourself)
 
 1. **Single Source of Truth**: Each piece of business logic should exist in only one place
-
    - ✅ Correct: Use `SimpleFilterService.check_filters()` everywhere
    - ❌ Wrong: Rewrite filtering logic in multiple places
 
@@ -48,7 +47,6 @@ alwaysApply: true
 
 3. **Centralize Business Logic**: Keep business rules in dedicated service classes
    Example:
-
    - Filter matching → `SimpleFilterService`
    - Price filtering → `PriceFilterService`
    - User management → `UserService`
@@ -61,12 +59,10 @@ alwaysApply: true
 ## Import Organization
 
 1. **Import Placement**: All imports must be at the top of the file
-
    - ❌ Wrong: Import inside functions or methods
    - ✅ Correct: All imports at the beginning of the file
 
 2. **Import Sorting**: Use isort to sort imports according to linter rules
-
    - Standard library imports first
    - Third-party library imports second
    - Local application imports last
@@ -96,27 +92,23 @@ alwaysApply: true
 ## Technology Stack & Dependencies
 
 1. **Use Best Practices**: Always choose tools and libraries that follow industry best practices
-
    - Prefer well-maintained, actively developed projects
    - Choose libraries with good documentation and community support
    - Avoid deprecated or abandoned packages
 
 2. **Version Selection**: Use latest stable versions of libraries
-
    - ✅ Correct: Use latest stable release (e.g., `pydantic>=2.0.0`)
    - ❌ Wrong: Use outdated versions without good reason
    - Check for security updates regularly
    - Pin major versions, allow minor/patch updates
 
 3. **Dependency Management**:
-
    - Use `requirements.txt` or `pyproject.toml` for dependency management
    - Pin exact versions in production (`==`)
    - Use version ranges in development (`>=`)
    - Regularly update dependencies for security and features
 
 4. **Technology Choices**:
-
    - **Web Framework**: FastAPI (modern, async, type-safe)
    - **Database**: MongoDB with Motor (async driver)
    - **HTTP Client**: httpx (async, modern alternative to requests)
@@ -134,20 +126,17 @@ alwaysApply: true
 ## Code Comments & Documentation
 
 1. **Minimal Commenting**: Avoid excessive commenting, only add comments when necessary for understanding
-
    - ❌ Wrong: `# save to database` before `await self.save_to_database(data)`
    - ✅ Correct: `# Handle edge case when user data is incomplete` before complex logic
    - ❌ Wrong: `# increment counter` before `counter += 1`
    - ✅ Correct: `# Validate business rules before processing payment` before complex validation
 
 2. **Self-Documenting Code**: Write code that explains itself through good naming
-
    - Use descriptive names for classes, methods, functions, and variables
    - Choose names that clearly indicate purpose and behavior
    - Avoid abbreviations and unclear acronyms
 
 3. **When to Comment**:
-
    - Complex business logic that isn't obvious
    - Workarounds for external library bugs
    - Performance optimizations with non-obvious reasons
@@ -172,7 +161,6 @@ alwaysApply: true
    ```
 
 5. **Docstring Guidelines**:
-
    - Write docstrings for public classes and methods
    - Focus on what the function does, not how it does it
    - Include parameter types and return values
@@ -184,21 +172,18 @@ alwaysApply: true
 ## Data Protection Rules
 
 1. **NEVER use `docker-compose down -v`** unless explicitly requested by user
-
    - This command deletes ALL data including valuable parsed content
    - Use `docker-compose restart` or `./scripts/safe_restart.sh` for safe restarts
-   - Only use `-v` flag when user explicitly wants to start completely fresh
+   - Never use `-v` flag
 
 2. **Always warn before destructive operations**
-
    - Before any command that could delete data, explain the consequences
    - Ask for confirmation if the operation is potentially destructive
 
 3. **Prefer safe alternatives**
-
    - Use `docker-compose restart` instead of `docker-compose down && docker-compose up`
    - Use `docker-compose stop && docker-compose start` for full restart without data loss
-   - Only use `docker-compose down -v` when user explicitly requests complete reset
+   - Never use `docker-compose down -v`
 
 4. **Data backup recommendations**
    - Suggest creating backups before major changes

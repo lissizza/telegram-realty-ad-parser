@@ -34,6 +34,10 @@ class IncomingMessage(BaseModel):
     processed_at: Optional[datetime] = None
     parsing_errors: List[str] = []
     
+    # Retry information (for rate limit/concurrency errors)
+    retry_count: int = 0
+    retry_after: Optional[datetime] = None
+    
     # Content analysis
     is_spam: Optional[bool] = None
     spam_reason: Optional[str] = None

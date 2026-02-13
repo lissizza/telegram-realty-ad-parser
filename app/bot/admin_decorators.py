@@ -151,5 +151,15 @@ async def is_admin(user_id: int) -> bool:
         return False
 
 
+async def is_super_admin(user_id: int) -> bool:
+    """Check if user is super admin"""
+    try:
+        admin_user = await admin_service.get_admin_user(user_id)
+        return admin_user is not None and admin_user.role.value == "super_admin"
+    except Exception as e:
+        logger.error("Error checking if user %s is super admin: %s", user_id, e)
+        return False
+
+
 
 

@@ -27,10 +27,10 @@ class Settings(BaseSettings):
 
     # === LLM SETTINGS (from .env) ===
     ENABLE_LLM_PARSING: bool = Field(default=True, description="Enable LLM-based parsing for better accuracy")
-    LLM_PROVIDER: str = Field(default="openai", description="LLM provider: openai, anthropic, local, mock")
+    LLM_PROVIDER: str = Field(default="openai", description="LLM provider: openai, anthropic, zai, local, mock")
     LLM_API_KEY: Optional[str] = Field(default=None, description="API key for LLM service")
     LLM_MODEL: str = Field(default="gpt-3.5-turbo", description="LLM model to use for parsing")
-    LLM_BASE_URL: Optional[str] = Field(default=None, description="Base URL for LLM API (for local models)")
+    LLM_BASE_URL: Optional[str] = Field(default=None, description="Base URL for LLM API (for local models or Z.AI)")
     LLM_MAX_TOKENS: int = Field(default=1000, description="Maximum tokens for LLM response")
     LLM_TEMPERATURE: float = Field(default=0.1, description="Temperature for LLM generation (0.0-1.0)")
 

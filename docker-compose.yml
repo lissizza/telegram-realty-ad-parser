@@ -7,6 +7,8 @@ services:
       - .:/app
       - ./data:/app/data
       - ./logs:/app/logs # <— добавлено
+    env_file:
+      - .env
     environment:
       - MONGODB_URL=${MONGODB_URL}
       - REDIS_URL=${REDIS_URL}

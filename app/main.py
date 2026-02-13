@@ -114,6 +114,15 @@ async def lifespan(app: FastAPI):
     # Initialize admin notification service
     from app.services.admin_notification_service import admin_notification_service
     from app.services.notification_service import TelegramNotificationService
+    from app.services.llm_quota_service import llm_quota_service
+    from app.services.llm_service import LLMService
+    
+    # Create LLM service instance and inject it into quota service
+    llm_service = LLMService()
+    logger.info("LLM Service initialized: provider=%s, model=%s, base_url=%s", 
+                settings.LLM_PROVIDER, settings.LLM_MODEL, settings.LLM_BASE_URL or "default")
+    llm_quota_service.set_llm_service(llm_service)
+    
     admin_notification_service.set_notification_service(TelegramNotificationService(telegram_bot))
     bot_task = None
     parsing_task = None
@@ -140,10 +149,18 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("Telegram API credentials not found, skipping parsing service")
 
+        # Start periodic LLM balance checking
+        await llm_quota_service.start_periodic_balance_check()
+        logger.info("Started periodic LLM balance check (interval: 15 minutes)")
+
         yield
 
     finally:
         # Shutdown
+        from app.services.llm_quota_service import llm_quota_service
+        await llm_quota_service.stop_periodic_balance_check()
+        logger.info("Stopped periodic LLM balance check")
+        
         if bot_task:
             await telegram_bot.stop_bot()
             bot_task.cancel()

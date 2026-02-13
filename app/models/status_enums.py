@@ -14,8 +14,11 @@ class IncomingMessageStatus(str, Enum):
     SPAM_FILTERED = "spam_filtered"  # Filtered as spam
     MEDIA_ONLY = "media_only"       # Message contains only media without text
     ERROR = "error"                 # Error during processing
+    RETRY = "retry"                 # Temporary failure, waiting for retry
     DUPLICATE = "duplicate"         # Duplicate message (same content)
     SKIPPED = "skipped"             # Skipped for other reasons
+    DELETED = "deleted"             # Message was deleted from channel
+    FORWARDED = "forwarded"         # Message was forwarded to user
 
 
 class RealEstateAdStatus(str, Enum):

@@ -2,8 +2,9 @@ import asyncio
 import hashlib
 import logging
 import sys
+import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
@@ -20,6 +21,7 @@ from app.models.simple_filter import SimpleFilter
 from app.models.telegram import RealEstateAd
 from app.services.admin_notification_service import admin_notification_service
 from app.services.llm_service import LLMService
+from app.services.llm_quota_service import llm_quota_service
 from app.services.notification_service import TelegramNotificationService
 from app.services.price_filter_service import PriceFilterService
 from app.services.filter_service import FilterService
@@ -403,6 +405,14 @@ class TelegramService:
 
                             if existing_post:
                                 current_status = existing_post.get("processing_status")
+                                
+                                # Skip deleted messages - they should never be reprocessed
+                                if current_status == IncomingMessageStatus.DELETED:
+                                    logger.debug("Skipping message %s - status is DELETED", message.id)
+                                    skipped_messages += 1
+                                    channel_skipped += 1
+                                    continue
+                                
                                 # If already successfully processed, check if we should continue
                                 # Continue processing if there might be PROCESSING messages ahead
                                 if current_status in [IncomingMessageStatus.PARSED, IncomingMessageStatus.NOT_REAL_ESTATE, IncomingMessageStatus.SPAM_FILTERED, IncomingMessageStatus.MEDIA_ONLY]:
@@ -427,6 +437,19 @@ class TelegramService:
                                         channel_skipped += 1
                                         break  # Stop processing this channel, we've caught up
                                 elif current_status == IncomingMessageStatus.ERROR:
+                                    # Check if it's a quota error and quota is still exceeded
+                                    from app.services.llm_quota_service import llm_quota_service
+                                    parsing_errors = existing_post.get("parsing_errors", [])
+                                    is_quota_error = any(
+                                        "quota" in str(error).lower() or "insufficient" in str(error).lower()
+                                        for error in parsing_errors
+                                    )
+                                    if is_quota_error and llm_quota_service.is_quota_exceeded():
+                                        logger.info("Skipping message %s with quota error status (quota still exceeded)", message.id)
+                                        skipped_messages += 1
+                                        channel_skipped += 1
+                                        continue
+                                    
                                     logger.info("Message %s had error status, reprocessing", message.id)
                                     await self._process_message(message)
                                     processed_messages += 1
@@ -466,21 +489,91 @@ class TelegramService:
             logger.error("Error in catch-up loading from monitored channels: %s", e)
 
     async def _reprocess_stuck_messages(self) -> None:
-        """Reprocess all messages stuck in PROCESSING or ERROR status after restart"""
+        """Reprocess all messages stuck in PROCESSING, ERROR, or RETRY status"""
         try:
-            logger.info("Checking for stuck messages (PROCESSING or ERROR status)...")
+            from app.services.llm_quota_service import llm_quota_service
+            
+            logger.info("Checking for stuck messages (PROCESSING, ERROR, or RETRY status)...")
+            
+            # Check if quota is exceeded - skip reprocessing if so
+            if llm_quota_service.is_quota_exceeded():
+                logger.info("LLM quota exceeded - skipping reprocessing of stuck messages")
+                return
             
             db = mongodb.get_database()
             
-            # Find all messages in PROCESSING or ERROR status
+            # Current time for retry_after check
+            current_time = datetime.now(timezone.utc)
+            
+            # Find all messages in PROCESSING, ERROR, or RETRY status (exclude deleted messages)
             stuck_messages = []
             async for message_doc in db.incoming_messages.find({
-                "processing_status": {"$in": [IncomingMessageStatus.PROCESSING, IncomingMessageStatus.ERROR]}
+                "$and": [
+                    {"processing_status": {"$in": [
+                        IncomingMessageStatus.PROCESSING, 
+                        IncomingMessageStatus.ERROR,
+                        IncomingMessageStatus.RETRY
+                    ]}},
+                    {"processing_status": {"$ne": IncomingMessageStatus.DELETED}}
+                ]
             }):
+                # Skip messages with ERROR status due to quota if quota is still exceeded
+                # Also check if error indicates message was deleted and mark as DELETED
+                if message_doc["processing_status"] == IncomingMessageStatus.ERROR:
+                    parsing_errors = message_doc.get("parsing_errors", [])
+                    error_str = " ".join(str(e) for e in parsing_errors).lower()
+                    
+                    # Check if it's a deletion-related error
+                    is_deletion_error = any(keyword in error_str for keyword in [
+                        "not found", "deleted", "message not found", "channel not found",
+                        "chat not found", "access denied", "forbidden", "not accessible"
+                    ])
+                    
+                    if is_deletion_error:
+                        # Mark as DELETED immediately without reprocessing
+                        logger.info("Message %s has deletion-related error, marking as DELETED: %s", 
+                                  message_doc["id"], parsing_errors)
+                        try:
+                            await db.incoming_messages.update_one(
+                                {"id": message_doc["id"], "channel_id": message_doc["channel_id"]},
+                                {
+                                    "$set": {
+                                        "processing_status": IncomingMessageStatus.DELETED,
+                                        "parsing_errors": parsing_errors,
+                                        "updated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            )
+                            continue  # Skip this message
+                        except Exception as e:
+                            logger.error("Error marking message %s as DELETED: %s", message_doc["id"], e)
+                    
+                    # Check for quota errors
+                    is_quota_error = any(
+                        "quota" in str(error).lower() or "insufficient" in str(error).lower()
+                        for error in parsing_errors
+                    )
+                    if is_quota_error and llm_quota_service.is_quota_exceeded():
+                        logger.info("Skipping message %s with quota error status (quota still exceeded)", message_doc["id"])
+                        continue
+                
+                # For RETRY messages, check if retry_after time has passed
+                if message_doc["processing_status"] == IncomingMessageStatus.RETRY:
+                    retry_after = message_doc.get("retry_after")
+                    if retry_after:
+                        # Ensure both datetimes are timezone-aware for comparison
+                        if retry_after.tzinfo is None:
+                            retry_after = retry_after.replace(tzinfo=timezone.utc)
+                        if retry_after > current_time:
+                            # Not yet time to retry
+                            logger.debug("Skipping message %s - retry scheduled for %s", message_doc["id"], retry_after)
+                            continue
+                
                 stuck_messages.append({
                     "id": message_doc["id"],
                     "channel_id": message_doc["channel_id"],
-                    "status": message_doc["processing_status"]
+                    "status": message_doc["processing_status"],
+                    "retry_count": message_doc.get("retry_count", 0)
                 })
             
             if not stuck_messages:
@@ -491,6 +584,7 @@ class TelegramService:
             
             processed_count = 0
             error_count = 0
+            skipped_count = 0
             
             # Process each stuck message
             for msg_info in stuck_messages:
@@ -498,6 +592,12 @@ class TelegramService:
                     message_id = msg_info["id"]
                     channel_id = msg_info["channel_id"]
                     status = msg_info["status"]
+                    
+                    # Check quota before processing
+                    if llm_quota_service.is_quota_exceeded():
+                        logger.info("LLM quota exceeded - skipping reprocessing of message %s", message_id)
+                        skipped_count += 1
+                        continue
                     
                     logger.info("Reprocessing stuck message %s from channel %s (status: %s)", 
                                message_id, channel_id, status)
@@ -512,8 +612,24 @@ class TelegramService:
                         try:
                             channel_entity = await self.client.get_entity(channel_id)
                         except Exception as e:
-                            logger.warning("Could not get channel entity for %s: %s, skipping message %s", channel_id, e, message_id)
-                            error_count += 1
+                            error_str = str(e).lower()
+                            # Check if channel doesn't exist or access denied
+                            if "not found" in error_str or "chat not found" in error_str or "channel not found" in error_str:
+                                logger.info("Channel %s not found or access denied, marking message %s as DELETED", channel_id, message_id)
+                                await db.incoming_messages.update_one(
+                                    {"id": message_id, "channel_id": channel_id},
+                                    {
+                                        "$set": {
+                                            "processing_status": IncomingMessageStatus.DELETED,
+                                            "parsing_errors": [f"Channel not found or access denied: {str(e)}"],
+                                            "updated_at": datetime.now(timezone.utc)
+                                        }
+                                    }
+                                )
+                                skipped_count += 1
+                            else:
+                                logger.warning("Could not get channel entity for %s: %s, skipping message %s", channel_id, e, message_id)
+                                error_count += 1
                             continue
                         
                         # Get message entity
@@ -529,50 +645,207 @@ class TelegramService:
                             message = messages
                         
                         if not message:
-                            logger.warning("Message %s not found in channel %s, marking as ERROR", message_id, channel_id)
-                            # Update status to ERROR if message not found
-                            await db.incoming_messages.update_one(
-                                {"id": message_id, "channel_id": channel_id},
-                                {
-                                    "$set": {
-                                        "processing_status": IncomingMessageStatus.ERROR,
-                                        "parsing_errors": [f"Message not found in channel after restart"],
-                                        "updated_at": datetime.now(timezone.utc)
+                            # Message was deleted from channel - this is normal, not an error
+                            logger.info("Message %s not found in channel %s (likely deleted), marking as DELETED", message_id, channel_id)
+                            # Update status to a special status or skip reprocessing
+                            # Check if already marked as deleted to avoid repeated logging
+                            existing = await db.incoming_messages.find_one({"id": message_id, "channel_id": channel_id})
+                            if existing and existing.get("processing_status") != IncomingMessageStatus.DELETED:
+                                await db.incoming_messages.update_one(
+                                    {"id": message_id, "channel_id": channel_id},
+                                    {
+                                        "$set": {
+                                            "processing_status": IncomingMessageStatus.DELETED,
+                                            "parsing_errors": [f"Message deleted from channel"],
+                                            "updated_at": datetime.now(timezone.utc)
+                                        }
                                     }
-                                }
-                            )
-                            error_count += 1
+                                )
+                            skipped_count += 1
                             continue
                         
-                        # Reprocess the message
+                        # Check if LLM quota is exceeded before reprocessing
+                        if llm_quota_service.is_quota_exceeded():
+                            logger.info("Skipping reprocessing of message %s - LLM quota exceeded", message_id)
+                            skipped_count += 1
+                            continue
+                        
+                        # Reprocess the message (don't clear parsing_errors - let processing handle it)
                         await self._process_message(message, force=False)
-                        processed_count += 1
-                        logger.info("Successfully reprocessed stuck message %s", message_id)
+                        
+                        # Wait a bit for processing to complete
+                        await asyncio.sleep(0.5)
+                        
+                        # Check if message was successfully processed (not ERROR status)
+                        updated_post = await db.incoming_messages.find_one({"id": message_id, "channel_id": channel_id})
+                        if updated_post and updated_post.get("processing_status") == IncomingMessageStatus.ERROR:
+                            # Message still has ERROR status after reprocessing
+                            parsing_errors = updated_post.get("parsing_errors", [])
+                            error_str = " ".join(str(e) for e in parsing_errors).lower()
+                            
+                            # Analyze error type to determine if message should be marked as DELETED
+                            is_deletion_error = False
+                            deletion_reason = None
+                            
+                            # Check for various "not found" or "deleted" error patterns
+                            if not parsing_errors:
+                                # No errors recorded but status is ERROR - check if message exists
+                                logger.warning("Message %s has ERROR status but no parsing_errors recorded - checking if message exists", message_id)
+                                try:
+                                    check_messages = await self.client.get_messages(channel_entity, ids=message_id)
+                                    message_exists = False
+                                    if isinstance(check_messages, list):
+                                        message_exists = len(check_messages) > 0
+                                    else:
+                                        message_exists = check_messages is not None
+                                    
+                                    if not message_exists:
+                                        # Message doesn't exist - mark as DELETED
+                                        is_deletion_error = True
+                                        deletion_reason = "Message not found in channel (no errors recorded, message deleted)"
+                                    else:
+                                        # Message exists but has ERROR status without errors - treat as NOT_REAL_ESTATE
+                                        logger.info("Message %s exists but has ERROR status without errors - setting to NOT_REAL_ESTATE", message_id)
+                                        await db.incoming_messages.update_one(
+                                            {"id": message_id, "channel_id": channel_id},
+                                            {
+                                                "$set": {
+                                                    "processing_status": IncomingMessageStatus.NOT_REAL_ESTATE,
+                                                    "parsing_errors": [],
+                                                    "is_real_estate": False,
+                                                    "updated_at": datetime.now(timezone.utc)
+                                                }
+                                            }
+                                        )
+                                        processed_count += 1
+                                        continue
+                                except Exception as check_error:
+                                    # If we can't check, treat as deletion error if it's a "not found" error
+                                    check_error_str = str(check_error).lower()
+                                    if any(keyword in check_error_str for keyword in ["not found", "deleted", "message not found"]):
+                                        is_deletion_error = True
+                                        deletion_reason = f"Error checking message existence: {str(check_error)}"
+                                    else:
+                                        logger.warning("Could not check if message %s exists: %s - leaving as ERROR", message_id, check_error)
+                            
+                            # Check if errors indicate deletion
+                            if not is_deletion_error and any(keyword in error_str for keyword in [
+                                "not found", "deleted", "message not found", "channel not found",
+                                "chat not found", "access denied", "forbidden", "not accessible"
+                            ]):
+                                is_deletion_error = True
+                                deletion_reason = f"Error indicates message was deleted: {parsing_errors}"
+                            
+                            if is_deletion_error:
+                                logger.info("Message %s has deletion-related error, marking as DELETED: %s", message_id, deletion_reason)
+                                await db.incoming_messages.update_one(
+                                    {"id": message_id, "channel_id": channel_id},
+                                    {
+                                        "$set": {
+                                            "processing_status": IncomingMessageStatus.DELETED,
+                                            "parsing_errors": parsing_errors if parsing_errors else [deletion_reason],
+                                            "updated_at": datetime.now(timezone.utc)
+                                        }
+                                    }
+                                )
+                                skipped_count += 1
+                            elif not parsing_errors:
+                                # No errors but status is ERROR and message exists - should have been handled above
+                                # But if we got here, treat as NOT_REAL_ESTATE
+                                logger.info("Message %s has ERROR status without errors - setting to NOT_REAL_ESTATE", message_id)
+                                await db.incoming_messages.update_one(
+                                    {"id": message_id, "channel_id": channel_id},
+                                    {
+                                        "$set": {
+                                            "processing_status": IncomingMessageStatus.NOT_REAL_ESTATE,
+                                            "parsing_errors": [],
+                                            "is_real_estate": False,
+                                            "updated_at": datetime.now(timezone.utc)
+                                        }
+                                    }
+                                )
+                                processed_count += 1
+                            else:
+                                # Check if this is a concurrency/rate limit error that should be retried
+                                is_concurrency_error = '1302' in error_str or 'concurrency' in error_str or 'high concurrency' in error_str
+                                is_rate_limit_error = 'rate limit' in error_str or 'too many requests' in error_str
+                                
+                                if is_concurrency_error or is_rate_limit_error:
+                                    # Convert old concurrency/rate limit ERROR to RETRY status
+                                    error_type = "concurrency" if is_concurrency_error else "rate limit"
+                                    logger.info("Message %s has %s error - converting to RETRY status", message_id, error_type)
+                                    
+                                    # Calculate retry parameters
+                                    retry_count = updated_post.get("retry_count", 0) + 1
+                                    retry_delay = min(30 * (2 ** (retry_count - 1)), 480)
+                                    retry_after = datetime.now(timezone.utc) + timedelta(seconds=retry_delay)
+                                    
+                                    await db.incoming_messages.update_one(
+                                        {"id": message_id, "channel_id": channel_id},
+                                        {
+                                            "$set": {
+                                                "processing_status": IncomingMessageStatus.RETRY,
+                                                "retry_count": retry_count,
+                                                "retry_after": retry_after,
+                                                "updated_at": datetime.now(timezone.utc)
+                                            }
+                                        }
+                                    )
+                                    logger.info("Message %s set to RETRY (attempt %d, delay %ds, retry after %s)", 
+                                               message_id, retry_count, retry_delay, retry_after)
+                                    processed_count += 1
+                                else:
+                                    # Real error, not related to deletion or concurrency - log with full context
+                                    error_count += 1
+                                    current_provider = self.llm_service.provider
+                                    current_model = self.llm_service.model
+                                    logger.warning("Message %s still has ERROR status after reprocessing (current LLM: %s/%s). Errors: %s", 
+                                                message_id, current_provider, current_model, parsing_errors)
+                        else:
+                            # Message was successfully reprocessed
+                            processed_count += 1
+                            logger.info("Successfully reprocessed stuck message %s", message_id)
                         
                     except Exception as e:
-                        logger.error("Error getting/reprocessing message %s: %s", message_id, e)
-                        error_count += 1
-                        # Update status to ERROR if reprocessing failed
-                        try:
+                        error_str = str(e).lower()
+                        # Check if it's a "message not found" or "deleted" error
+                        if "not found" in error_str or "deleted" in error_str or "message not found" in error_str:
+                            logger.info("Message %s not found in channel (likely deleted), marking as DELETED", message_id)
                             await db.incoming_messages.update_one(
                                 {"id": message_id, "channel_id": channel_id},
                                 {
                                     "$set": {
-                                        "processing_status": IncomingMessageStatus.ERROR,
-                                        "parsing_errors": [f"Reprocessing error: {str(e)}"],
+                                        "processing_status": IncomingMessageStatus.DELETED,
+                                        "parsing_errors": [f"Message not found in channel: {str(e)}"],
                                         "updated_at": datetime.now(timezone.utc)
                                     }
                                 }
                             )
-                        except Exception as update_error:
-                            logger.error("Error updating message %s status: %s", message_id, update_error)
+                            skipped_count += 1
+                        else:
+                            logger.error("Error getting/reprocessing message %s: %s", message_id, e)
+                            error_count += 1
+                            # Update status to ERROR if reprocessing failed (but only if it's not a "not found" error)
+                            try:
+                                await db.incoming_messages.update_one(
+                                    {"id": message_id, "channel_id": channel_id},
+                                    {
+                                        "$set": {
+                                            "processing_status": IncomingMessageStatus.ERROR,
+                                            "parsing_errors": [f"Reprocessing error: {str(e)}"],
+                                            "updated_at": datetime.now(timezone.utc)
+                                        }
+                                    }
+                                )
+                            except Exception as update_error:
+                                logger.error("Error updating message %s status: %s", message_id, update_error)
                 
                 except Exception as e:
                     logger.error("Error processing stuck message %s: %s", msg_info.get("id"), e)
                     error_count += 1
             
-            logger.info("Stuck messages reprocessing completed: processed %d, errors %d", 
-                       processed_count, error_count)
+            logger.info("Stuck messages reprocessing completed: processed %d, skipped %d (quota), errors %d", 
+                       processed_count, skipped_count, error_count)
             
         except Exception as e:
             logger.error("Error in reprocess_stuck_messages: %s", e)
@@ -879,13 +1152,7 @@ class TelegramService:
         """Get list of monitored subchannel (topic) IDs from settings"""
         try:
             subchannels = settings.monitored_subchannels_list
-
-            if not subchannels:
-                logger.info("No monitored subchannels configured")
-                return []
-
-            logger.info("Monitoring %s subchannels: %s", len(subchannels), subchannels)
-            return subchannels
+            return subchannels if subchannels else []
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error getting monitored subchannels: %s", e)
             return []
@@ -907,13 +1174,51 @@ class TelegramService:
             logger.error("Error checking topic: %s", e)
             return False
 
-    def _is_from_monitored_subchannel(self, message: Message) -> bool:
+    async def _is_from_monitored_subchannel(self, message: Message) -> bool:
         """Check if message is from a monitored subchannel (topic)"""
         try:
-            # For user subscription monitoring, we should process all messages
-            # The filtering by channel and topic is already done in _handle_user_subscription_message
-            # If there's a topic_id in the subscription, it will be checked there
+            channel_id = message.chat_id
+            
+            # Get list of monitored subchannels from settings
+            monitored_subchannels = self._get_monitored_subchannels()
+            
+            # If no subchannels configured, process all messages (backward compatibility)
+            if not monitored_subchannels:
+                return True
+            
+            # Get excluded subchannels
+            excluded_subchannels = []
+            if settings.TELEGRAM_EXCLUDED_SUBCHANNELS:
+                try:
+                    excluded_subchannels = [int(x.strip()) for x in settings.TELEGRAM_EXCLUDED_SUBCHANNELS.split(",") if x.strip()]
+                except ValueError as e:
+                    logger.warning("Invalid excluded subchannels format: %s", e)
+            
+            # Check if message is in any of the monitored subchannels
+            for monitored_channel_id, topic_id in monitored_subchannels:
+                if monitored_channel_id == channel_id:
+                    # Check if message is in this topic
+                    is_in_topic = await self._is_message_in_topic(message, channel_id, topic_id)
+                    if is_in_topic:
+                        # Also check if this topic is not excluded
+                        if topic_id not in excluded_subchannels:
+                            logger.info("Processing message %s from channel %s, subchannel %s", message.id, channel_id, topic_id)
+                            return True
+                        else:
+                            logger.debug("Message %s is in excluded subchannel %s:%s, skipping", message.id, channel_id, topic_id)
+                            return False
+            
+            # If channel is in monitored subchannels list but message is not in any monitored topic, skip it
+            channel_in_monitored = any(monitored_channel_id == channel_id for monitored_channel_id, _ in monitored_subchannels)
+            if channel_in_monitored:
+                logger.debug("Message %s from channel %s is not in any monitored subchannel, skipping", message.id, channel_id)
+                return False
+            
+            # If channel is not in monitored subchannels list, it means subchannels are not configured for this channel
+            # In this case, process all messages from this channel (it may be monitored without subchannel restrictions)
+            logger.debug("Message %s from channel %s - subchannels not configured for this channel, processing", message.id, channel_id)
             return True
+            
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error checking subchannel: %s", e)
             return False
@@ -954,7 +1259,7 @@ class TelegramService:
             if message.text and message.text.strip():
                 return False
 
-            # Check if message has media
+            # Check if message has media (use getattr for optional attributes)
             has_media = (
                 message.photo
                 or message.video
@@ -963,19 +1268,61 @@ class TelegramService:
                 or message.voice
                 or message.video_note
                 or message.sticker
-                or message.animation
+                or getattr(message, "animation", None)
                 or message.contact
                 or message.location
                 or message.venue
                 or message.poll
-                or message.game
-                or message.web_preview
+                or getattr(message, "game", None)
+                or getattr(message, "web_preview", None)
             )
 
             return bool(has_media)
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error checking media-only message: %s", e)
             return False
+
+    async def _mark_message_as_read(self, message: Message) -> None:
+        """Mark message as read in Telegram channel/chat"""
+        try:
+            if not self.client or not self.client.is_connected():
+                logger.warning("Telegram client not connected, cannot mark message as read")
+                return
+
+            # Get channel/chat entity
+            try:
+                entity = await self.client.get_entity(message.chat_id)
+            except Exception as e:
+                logger.warning("Could not get entity for channel %s: %s", message.chat_id, e)
+                return
+
+            # Check if it's a channel (supergroup) or regular chat
+            is_channel = isinstance(entity, (types.Channel, types.ChannelForbidden))
+            
+            if is_channel:
+                # For channels, use ReadHistoryRequest
+                try:
+                    await self.client(functions.channels.ReadHistoryRequest(
+                        channel=entity,
+                        max_id=message.id
+                    ))
+                    logger.info("Marked message %s as read in channel %s", message.id, message.chat_id)
+                except Exception as e:
+                    logger.warning("Error marking message %s as read in channel %s: %s", message.id, message.chat_id, e)
+            else:
+                # For regular chats/groups, use messages.ReadHistoryRequest
+                try:
+                    await self.client(functions.messages.ReadHistoryRequest(
+                        peer=entity,
+                        max_id=message.id
+                    ))
+                    logger.info("Marked message %s as read in chat %s", message.id, message.chat_id)
+                except Exception as e:
+                    logger.warning("Error marking message %s as read in chat %s: %s", message.id, message.chat_id, e)
+
+        except Exception as e:  # pylint: disable=broad-except
+            # Don't let read marking errors break the processing flow
+            logger.warning("Error in _mark_message_as_read for message %s: %s", message.id, e)
 
     async def _save_message_status(self, message: Message, status: str) -> None:
         """Save message with specific status using IncomingMessage model"""
@@ -1033,15 +1380,12 @@ class TelegramService:
         try:
             # Log message details for debugging
             # Check if message is from monitored subchannel (topic)
-            if not self._is_from_monitored_subchannel(message):
+            if not await self._is_from_monitored_subchannel(message):
                 return
 
             # Check if message is media-only (skip processing completely)
             if self._is_media_only_message(message):
                 return
-            
-            # Log only messages that will be processed
-            logger.info("Processing message %s from channel %s", message.id, message.chat_id)
             if message.text:
                 logger.info("Message text: %s", message.text[:200] + "..." if len(message.text) > 200 else message.text)
 
@@ -1066,12 +1410,10 @@ class TelegramService:
                 # Create RealEstateAd object from existing data
                 real_estate_ad = RealEstateAd(**existing_ad)
                 
-                # Check if the original ad was already forwarded
-                if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
-                    logger.info("Original ad %s already forwarded, skipping duplicate %s", existing_ad["_id"], message.id)
-                else:
-                    # Forward using existing parsed data (without re-parsing with LLM)
-                    await self._check_filters_for_all_users(real_estate_ad, message)
+                # Check filters for duplicates - for users, duplicates are treated as regular new ads
+                # They will be sent if they match filters and haven't been sent for this specific incoming_message_id
+                logger.info("Checking filters for duplicate message %s (original ad: %s)", message.id, existing_ad["_id"])
+                await self._check_filters_for_all_users(real_estate_ad, message)
                 
                 # Check if we need to update the incoming message status
                 existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
@@ -1088,6 +1430,8 @@ class TelegramService:
                         }
                     )
                     logger.info("Updated existing IncomingMessage %s to DUPLICATE status", message.id)
+                    # Mark message as read after saving to database
+                    await self._mark_message_as_read(message)
                 else:
                     # Save the incoming message as duplicate
                     duplicate_data = {
@@ -1108,6 +1452,8 @@ class TelegramService:
                     
                     await db.incoming_messages.insert_one(duplicate_data)
                     logger.info("Saved duplicate message %s with DUPLICATE status", message.id)
+                    # Mark message as read after saving to database
+                    await self._mark_message_as_read(message)
                 return
 
             # Check if message already processed by ID
@@ -1117,6 +1463,21 @@ class TelegramService:
                 # Check if we need to reprocess (e.g., if status is ERROR, PROCESSING, or force=True)
                 # PROCESSING status means message was interrupted during processing, should be reprocessed
                 existing_status = existing_post.get("processing_status")
+                
+                # Skip deleted messages - they should never be reprocessed
+                if existing_status == IncomingMessageStatus.DELETED:
+                    logger.debug("Skipping message %s - status is DELETED", message.id)
+                    return
+                
+                # Skip messages with ERROR status due to quota if quota is still exceeded
+                if existing_status == IncomingMessageStatus.ERROR and not force:
+                    parsing_errors = existing_post.get("parsing_errors", [])
+                    is_quota_error = any("quota" in str(err).lower() or "insufficient" in str(err).lower() 
+                                       for err in parsing_errors)
+                    if is_quota_error and llm_quota_service.is_quota_exceeded():
+                        logger.info("Skipping message %s with quota error status (quota still exceeded)", message.id)
+                        return
+                
                 if not force and existing_status not in [IncomingMessageStatus.ERROR, IncomingMessageStatus.PROCESSING]:
                     return
 
@@ -1162,6 +1523,8 @@ class TelegramService:
                 
                 await db.incoming_messages.insert_one(duplicate_data)
                 logger.info("Saved duplicate message %s with DUPLICATE status", message.id)
+                # Mark message as read after saving to database
+                await self._mark_message_as_read(message)
                 
                 # Check if the original message was parsed successfully
                 if duplicate_by_hash.get("real_estate_ad_id"):
@@ -1172,12 +1535,10 @@ class TelegramService:
                         # Create RealEstateAd object from the duplicate
                         real_estate_ad = RealEstateAd(**real_estate_ad_doc)
                         
-                        # Check if the original ad was already forwarded
-                        if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
-                            logger.info("Original ad %s already forwarded, skipping duplicate %s", duplicate_by_hash["real_estate_ad_id"], message.id)
-                        else:
-                            # Forward the duplicate using the existing parsed data (without re-parsing with LLM)
-                            await self._check_filters_for_all_users(real_estate_ad, message)
+                        # Check filters for duplicates - for users, duplicates are treated as regular new ads
+                        # They will be sent if they match filters and haven't been sent for this specific incoming_message_id
+                        logger.info("Checking filters for duplicate message %s (original ad: %s)", message.id, duplicate_by_hash["real_estate_ad_id"])
+                        await self._check_filters_for_all_users(real_estate_ad, message)
                         
                 logger.info("Duplicate message %s processed without LLM parsing", message.id)
                 return
@@ -1222,10 +1583,14 @@ class TelegramService:
                     {"id": message.id, "channel_id": message.chat_id}, {"$set": post_data}
                 )
                 incoming_message_id = str(existing_post["_id"])
+                # Mark message as read after saving to database
+                await self._mark_message_as_read(message)
             else:
                 # Insert new post
                 result = await db.incoming_messages.insert_one(post_data)
                 incoming_message_id = str(result.inserted_id)
+                # Mark message as read after saving to database
+                await self._mark_message_as_read(message)
 
             # Try to parse as real estate ad using LLM
             message_text = message.text or ""
@@ -1237,8 +1602,26 @@ class TelegramService:
                 return
 
             if message_text:
+                # Check if LLM quota is exceeded before processing
+                if llm_quota_service.is_quota_exceeded():
+                    logger.warning("Skipping LLM processing for message %s - quota exceeded", message.id)
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.ERROR,
+                                "parsing_errors": ["LLM quota exceeded - processing skipped"],
+                                "processed_at": message.date,
+                                "updated_at": message.date,
+                            }
+                        },
+                    )
+                    return
+                
                 # Let LLM determine if it's a real estate ad
                 logger.info("Processing message %s with LLM", message.id)
+                
+                parse_start_time = time.time()
 
                 # Update status to parsing
                 await db.incoming_messages.update_one(
@@ -1268,6 +1651,47 @@ class TelegramService:
                     incoming_message_id,
                     incoming_message_obj.topic_id,
                 )
+                
+                parse_duration = time.time() - parse_start_time
+                logger.info("LLM parsing completed for message %s in %.2f seconds", message.id, parse_duration)
+
+                if real_estate_ad is None:
+                    # LLM parsing failed (returned None) - check if there are actual errors
+                    existing_post = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
+                    existing_status = existing_post.get("processing_status") if existing_post else None
+                    parsing_errors = existing_post.get("parsing_errors", []) if existing_post else []
+                    
+                    # If there are actual parsing errors, keep ERROR status
+                    if parsing_errors:
+                        logger.warning("LLM parsing returned None for message %s, but status is ERROR with errors - keeping ERROR status", message.id)
+                        # Make sure ERROR status is set
+                        if existing_status != IncomingMessageStatus.ERROR:
+                            await db.incoming_messages.update_one(
+                                {"id": message.id, "channel_id": message.chat_id},
+                                {
+                                    "$set": {
+                                        "processing_status": IncomingMessageStatus.ERROR,
+                                        "parsing_errors": parsing_errors,
+                                        "updated_at": message.date,
+                                    }
+                                },
+                            )
+                    else:
+                        # No errors - LLM just couldn't parse it as real estate
+                        # Set to NOT_REAL_ESTATE regardless of previous status
+                        logger.info("LLM parsing returned None for message %s without errors - setting to NOT_REAL_ESTATE", message.id)
+                        await db.incoming_messages.update_one(
+                            {"id": message.id, "channel_id": message.chat_id},
+                            {
+                                "$set": {
+                                    "processing_status": IncomingMessageStatus.NOT_REAL_ESTATE,
+                                    "is_real_estate": False,
+                                    "parsing_errors": [],
+                                    "updated_at": message.date,
+                                }
+                            },
+                        )
+                    return
 
                 if real_estate_ad:
                     # Check if LLM determined this is actually real estate
@@ -1352,23 +1776,87 @@ class TelegramService:
                 )
 
         except LLMQuotaExceededError as e:
-            logger.error("LLM quota exceeded while processing message %s: %s", message.id, e)
-            # Update status to error with quota info
-            try:
-                db = mongodb.get_database()
-                await db.incoming_messages.update_one(
-                    {"id": message.id, "channel_id": message.chat_id},
-                    {
-                        "$set": {
-                            "processing_status": IncomingMessageStatus.ERROR,
-                            "parsing_errors": [f"LLM quota exceeded ({e.provider}): {e.message}"],
-                            "processed_at": message.date,
-                            "updated_at": message.date,
-                        }
-                    },
-                )
-            except Exception as update_error:  # pylint: disable=broad-except
-                logger.error("Error updating message status to error: %s", update_error)
+            # Handle different types of LLM errors
+            db = mongodb.get_database()
+            
+            if e.is_quota:
+                # Quota exceeded (no balance) - set to ERROR, stop processing
+                logger.error("LLM quota exceeded (no balance) while processing message %s: %s", message.id, e)
+                try:
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.ERROR,
+                                "parsing_errors": [f"LLM quota exceeded ({e.provider}): {e.message}"],
+                                "processed_at": message.date,
+                                "updated_at": message.date,
+                            }
+                        },
+                    )
+                except Exception as update_error:  # pylint: disable=broad-except
+                    logger.error("Error updating message status to error: %s", update_error)
+                    
+            elif e.is_concurrency or e.is_rate_limit:
+                # Concurrency/rate limit exceeded - set to RETRY for reprocessing
+                error_type = "concurrency" if e.is_concurrency else "rate limit"
+                logger.warning("LLM %s exceeded while processing message %s: %s. Will retry.", error_type, message.id, e)
+                
+                try:
+                    # Get current retry count
+                    existing_msg = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
+                    retry_count = existing_msg.get("retry_count", 0) + 1 if existing_msg else 1
+                    
+                    # Calculate exponential backoff delay: 30s, 60s, 120s, 240s, 480s (max 8 minutes)
+                    retry_delay = min(30 * (2 ** (retry_count - 1)), 480)
+                    retry_after = datetime.now(timezone.utc) + timedelta(seconds=retry_delay)
+                    
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.RETRY,
+                                "parsing_errors": [f"LLM {error_type} exceeded ({e.provider}): {e.message}"],
+                                "retry_count": retry_count,
+                                "retry_after": retry_after,
+                                "updated_at": message.date,
+                            }
+                        },
+                    )
+                    
+                    logger.info("Message %s set to RETRY (attempt %d, delay %ds, retry after %s)", 
+                               message.id, retry_count, retry_delay, retry_after)
+                    
+                    # Notify admins about concurrency issue (rate limited to avoid spam)
+                    if e.is_concurrency:
+                        try:
+                            asyncio.create_task(
+                                admin_notification_service.notify_rate_limit_exceeded(
+                                    str(e), retry_count, retry_delay
+                                )
+                            )
+                        except Exception as notify_error:
+                            logger.error("Error creating notification task: %s", notify_error)
+                            
+                except Exception as update_error:  # pylint: disable=broad-except
+                    logger.error("Error updating message status to retry: %s", update_error)
+            else:
+                # Generic quota error - treat as ERROR
+                logger.error("LLM error while processing message %s: %s", message.id, e)
+                try:
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.ERROR,
+                                "parsing_errors": [f"LLM error ({e.provider}): {e.message}"],
+                                "processed_at": message.date,
+                                "updated_at": message.date,
+                            }
+                        },
+                    )
+                except Exception as update_error:  # pylint: disable=broad-except
+                    logger.error("Error updating message status to error: %s", update_error)
         except Exception as e:  # pylint: disable=broad-except
             logger.error("Error processing message: %s", e)
             # Update status to error
@@ -1389,13 +1877,18 @@ class TelegramService:
                 logger.error("Error updating post status to error: %s", update_error)
 
     async def _check_filters_for_all_users(self, real_estate_ad: RealEstateAd, message: Message) -> None:
-        """Check filters for ALL users and forward to matching users"""
+        """
+        Check filters for ALL users and forward to matching users.
+        
+        Note: Duplicate status is only used to skip LLM parsing. For users, duplicates
+        are treated as regular new ads - they are sent if they match filters and haven't
+        been sent for this specific incoming_message_id yet.
+        
+        Args:
+            real_estate_ad: The real estate ad to check
+            message: The incoming message (can be duplicate or new)
+        """
         try:
-            # Check if ad has already been forwarded (prevent duplicates)
-            if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
-                logger.info("Ad %s already forwarded, skipping filter check", message.id)
-                return
-            
             db = mongodb.get_database()
             
             # Get all active filters from all users
@@ -1405,10 +1898,21 @@ class TelegramService:
                 logger.info("No active filters found for ad %s", message.id)
                 return
             
-            logger.info("Checking %d filters for ad %s", len(all_filters), message.id)
+            logger.info("Checking %d filters for ad %s (message_id=%s)", len(all_filters), real_estate_ad.original_post_id, message.id)
             
             # Get channel selection service
             selection_service = UserChannelSelectionService()
+            
+            # Get ad ID for checking if already sent
+            ad_id = real_estate_ad.id if real_estate_ad.id else None
+            if not ad_id:
+                # Try to get ad ID from database
+                existing_ad = await db.real_estate_ads.find_one({"original_post_id": real_estate_ad.original_post_id})
+                if existing_ad:
+                    ad_id = str(existing_ad["_id"])
+            
+            if not ad_id:
+                logger.warning("Could not determine ad_id for ad %s, skipping duplicate check", real_estate_ad.original_post_id)
             
             # Check each filter
             for filter_doc in all_filters:
@@ -1422,10 +1926,10 @@ class TelegramService:
                     is_channel_selected = await selection_service.is_channel_selected_by_user(user_id, message.chat_id)
                     
                     if not is_channel_selected:
-                        logger.info("User %s has not selected channel %s, skipping filter '%s'", user_id, message.chat_id, filter_obj.name)
+                        logger.debug("User %s has not selected channel %s, skipping filter '%s'", user_id, message.chat_id, filter_obj.name)
                         continue
                     
-                    logger.info("Checking filter '%s' (user %s) for ad %s", filter_obj.name, user_id, message.id)
+                    logger.debug("Checking filter '%s' (user %s) for ad %s", filter_obj.name, user_id, message.id)
                     
                     # Get price filters for this filter
                     price_filter_service = PriceFilterService()
@@ -1436,19 +1940,24 @@ class TelegramService:
                     if filter_obj.matches_with_price_filters(real_estate_ad, price_filters):
                         logger.info("Ad %s matches filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
-                        # Check if ad has already been forwarded (prevent duplicates within the same processing cycle)
-                        if real_estate_ad.processing_status == RealEstateAdStatus.FORWARDED:
-                            logger.info("Ad %s already forwarded, skipping filter '%s'", message.id, filter_obj.name)
-                            continue
+                        # Check if this ad was already sent to this user for this specific incoming message
+                        # This prevents duplicate sends for the same incoming_message_id, but allows
+                        # sending the same ad when it appears as a duplicate (different incoming_message_id)
+                        if ad_id:
+                            already_sent = await db.outgoing_posts.find_one({
+                                "real_estate_ad_id": ad_id,
+                                "sent_to": str(user_id),
+                                "incoming_message_id": message.id
+                            })
+                            
+                            if already_sent:
+                                logger.info("Ad %s (message %s) already sent to user %s, skipping", ad_id, message.id, user_id)
+                                continue
                         
                         # Forward to user
                         await self._forward_post(message, real_estate_ad, filter_id, filter_obj.name, user_id)
-                        
-                        # Update the real_estate_ad object status to prevent further forwards in this cycle
-                        real_estate_ad.processing_status = RealEstateAdStatus.FORWARDED
-                        logger.info("Updated RealEstateAd object status to FORWARDED to prevent duplicate forwards")
                     else:
-                        logger.info("Ad %s does not match filter '%s' for user %s", message.id, filter_obj.name, user_id)
+                        logger.debug("Ad %s does not match filter '%s' for user %s", message.id, filter_obj.name, user_id)
                         
                 except Exception as e:
                     logger.error("Error checking filter %s for ad %s: %s", filter_doc.get("_id"), message.id, e)
@@ -1512,11 +2021,30 @@ class TelegramService:
             # Get ad ID (should be set after saving to MongoDB)
             ad_id = real_estate_ad.id if real_estate_ad.id else None
             if not ad_id:
-                logger.warning("RealEstateAd has no id, this should not happen!")
+                # Try to get ad ID from database by original_post_id
+                existing_ad = await db.real_estate_ads.find_one({"original_post_id": real_estate_ad.original_post_id})
+                if existing_ad:
+                    ad_id = str(existing_ad["_id"])
+                else:
+                    logger.error("Cannot forward post: RealEstateAd has no id and not found in database (original_post_id=%s)", real_estate_ad.original_post_id)
+                    return
+            
+            # Get incoming_message_id - use message.id if available, otherwise use original_post_id from real_estate_ad
+            # This ensures we always have a valid incoming_message_id, even when called from refilter_ads
+            incoming_message_id = message.id if message else real_estate_ad.original_post_id
+            
+            # Validate required fields - these should NEVER be null
+            if not ad_id:
+                logger.error("Cannot forward post: real_estate_ad_id is required but ad_id is None (user_id=%s, incoming_message_id=%s)", user_id, incoming_message_id)
+                return
+            
+            if not incoming_message_id:
+                logger.error("Cannot forward post: incoming_message_id is required but both message and original_post_id are None (ad_id=%s, user_id=%s)", ad_id, user_id)
+                return
             
             forwarding_data = {
                 "message": formatted_message,  # Add formatted message
-                "real_estate_ad_id": ad_id,  # Use correct ad ID
+                "real_estate_ad_id": ad_id,  # Required: must not be null
                 "filter_id": filter_id,
                 "user_id": user_id,  # Add user_id for backward compatibility
                 "sent_to": str(user_id),  # Convert to string as per model
@@ -1527,40 +2055,45 @@ class TelegramService:
                 "channel_title": channel_info.get("title") if channel_info else None,
                 "topic_id": real_estate_ad.original_topic_id,
                 "topic_title": topic_title,
-                "incoming_message_id": message.id if message else None,
+                "incoming_message_id": incoming_message_id,  # Required: must not be null
                 "created_at": datetime.now(timezone.utc),
                 "updated_at": datetime.now(timezone.utc),
             }
-            await db.outgoing_posts.insert_one(forwarding_data)
+            try:
+                await db.outgoing_posts.insert_one(forwarding_data)
+            except Exception as e:
+                # If unique index violation, it means we already sent this ad to this user for this message
+                # This can happen in race conditions, just log and continue
+                if "duplicate key error" in str(e).lower() or "E11000" in str(e):
+                    logger.warning("Ad %s already sent to user %s for message %s (race condition)", ad_id, user_id, incoming_message_id)
+                else:
+                    raise
 
-            # Update RealEstateAd status to FORWARDED to prevent duplicate forwards
-            if ad_id:
-                await db.real_estate_ads.update_one(
-                    {"_id": ObjectId(ad_id)},
-                    {
-                        "$set": {
-                            "processing_status": RealEstateAdStatus.FORWARDED.value,
-                            "updated_at": datetime.now(timezone.utc)
-                        }
-                    }
-                )
-                logger.info("Updated RealEstateAd %s status to FORWARDED", ad_id)
+            # Note: We don't update RealEstateAd status to FORWARDED because:
+            # 1. Different users have different filters - one user might receive it, another might not
+            # 2. Duplicates should always be sent to show the ad is still active
+            # Instead, we track forwarding per user via outgoing_posts collection
 
-            # Update post status to forwarded
-            await db.incoming_messages.update_one(
-                {"id": message.id, "channel_id": message.chat_id},
-                {
-                    "$set": {
-                        "processing_status": "forwarded",
-                        "forwarded": True,
-                        "forwarded_at": message.date,
-                        "forwarded_to": user_id,
-                        "updated_at": message.date,
-                    }
-                },
-            )
+            # Update incoming message status to FORWARDED only if this is the first forward
+            # (duplicates keep their DUPLICATE status)
+            # Only update if we have a message object (not when called from refilter_ads)
+            if message:
+                existing_msg = await db.incoming_messages.find_one({"id": message.id, "channel_id": message.chat_id})
+                if existing_msg and existing_msg.get("processing_status") != IncomingMessageStatus.DUPLICATE:
+                    await db.incoming_messages.update_one(
+                        {"id": message.id, "channel_id": message.chat_id},
+                        {
+                            "$set": {
+                                "processing_status": IncomingMessageStatus.FORWARDED,
+                                "forwarded": True,
+                                "forwarded_at": message.date,
+                                "forwarded_to": user_id,
+                                "updated_at": message.date,
+                            }
+                        },
+                    )
 
-            logger.info("Forwarded post %s to user %s via filter %s", message.id, user_id, filter_id)
+            logger.info("Forwarded post %s to user %s via filter %s", incoming_message_id, user_id, filter_id)
 
         except Exception as e:
             logger.error("Error forwarding post: %s", e)
@@ -1691,31 +2224,47 @@ class TelegramService:
                     logger.info("Force reprocessing message %s (current status: %s)", main_message.id, current_status)
                     await db.incoming_messages.update_one(
                         {"id": main_message.id, "channel_id": main_message.chat_id},
-                        {"$set": {"processing_status": "pending"}},
+                        {"$set": {"processing_status": IncomingMessageStatus.PENDING}},
                     )
                 else:
+                    # Skip deleted messages - they should never be reprocessed
+                    if current_status == IncomingMessageStatus.DELETED:
+                        logger.debug("Skipping message %s - status is DELETED", main_message.id)
+                        stats["skipped"] += 1
+                        continue
+                    
                     # Skip if already successfully processed (unless it's an error)
                     if current_status in [
-                        "parsed",
-                        "filtered",
-                        "forwarded",
-                        "spam_filtered",
-                        "not_real_estate",
-                        "media_only",
+                        IncomingMessageStatus.PARSED,
+                        IncomingMessageStatus.FORWARDED,
+                        IncomingMessageStatus.SPAM_FILTERED,
+                        IncomingMessageStatus.NOT_REAL_ESTATE,
+                        IncomingMessageStatus.MEDIA_ONLY,
                     ]:
                         stats["skipped"] += 1
                         continue
-                    elif current_status == "error":
+                    elif current_status == IncomingMessageStatus.ERROR:
+                        # Check if it's a quota error and quota is still exceeded
+                        parsing_errors = existing_post.get("parsing_errors", [])
+                        is_quota_error = any(
+                            "quota" in str(error).lower() or "insufficient" in str(error).lower()
+                            for error in parsing_errors
+                        )
+                        if is_quota_error and llm_quota_service.is_quota_exceeded():
+                            logger.info("Skipping message %s with quota error status (quota still exceeded)", main_message.id)
+                            stats["skipped"] += 1
+                            continue
+                        
                         logger.info("Message %s had error status, reprocessing", main_message.id)
                         await db.incoming_messages.update_one(
                             {"id": main_message.id, "channel_id": main_message.chat_id},
-                            {"$set": {"processing_status": "pending"}},
+                            {"$set": {"processing_status": IncomingMessageStatus.PENDING}},
                         )
                     else:
                         logger.info("Message %s has status %s, reprocessing", main_message.id, current_status)
                         await db.incoming_messages.update_one(
                             {"id": main_message.id, "channel_id": main_message.chat_id},
-                            {"$set": {"processing_status": "pending"}},
+                            {"$set": {"processing_status": IncomingMessageStatus.PENDING}},
                         )
             else:
                 logger.info("Message %s not found in database, processing for first time", main_message.id)
@@ -1731,14 +2280,15 @@ class TelegramService:
             post = await db.incoming_messages.find_one({"id": main_message.id, "channel_id": main_message.chat_id})
 
             if post:
-                if post.get("processing_status") == "spam_filtered":
+                post_status = post.get("processing_status")
+                if post_status == IncomingMessageStatus.SPAM_FILTERED:
                     stats["spam_filtered"] += 1
-                elif post.get("processing_status") == "media_only":
+                elif post_status == IncomingMessageStatus.MEDIA_ONLY:
                     # Media-only messages are not counted in main stats
                     pass
-                elif post.get("processing_status") == "not_real_estate":
+                elif post_status == IncomingMessageStatus.NOT_REAL_ESTATE:
                     stats["not_real_estate"] += 1
-                elif post.get("processing_status") in ["parsed", "filtered", "forwarded"]:
+                elif post_status in [IncomingMessageStatus.PARSED, IncomingMessageStatus.FORWARDED]:
                     stats["real_estate_ads"] += 1
 
                     # Check if it matched filters for this user
@@ -1767,9 +2317,9 @@ class TelegramService:
                                 stats["forwarded"] += 1
                     else:
                         # Legacy mode - count all matches
-                        if post.get("processing_status") == "forwarded":
+                        if post_status == IncomingMessageStatus.FORWARDED:
                             stats["forwarded"] += 1
-                elif post.get("processing_status") == "error":
+                elif post_status == IncomingMessageStatus.ERROR:
                     stats["errors"] += 1
 
         logger.info("Reprocessing completed: %s", stats)
@@ -1902,6 +2452,11 @@ class TelegramService:
             message += f"*Комнат:* {self._escape_markdown(str(real_estate_ad.rooms_count))}\n"
         if real_estate_ad.area_sqm:
             message += f"*Площадь:* {self._escape_markdown(str(real_estate_ad.area_sqm))} кв\\.м\n"
+        if real_estate_ad.floor is not None:
+            if real_estate_ad.total_floors is not None:
+                message += f"*Этаж:* {self._escape_markdown(str(real_estate_ad.floor))}/{self._escape_markdown(str(real_estate_ad.total_floors))}\n"
+            else:
+                message += f"*Этаж:* {self._escape_markdown(str(real_estate_ad.floor))}\n"
         if real_estate_ad.price:
             # Get currency value (handle both enum and string)
             currency_value = real_estate_ad.currency.value if hasattr(real_estate_ad.currency, 'value') else str(real_estate_ad.currency)

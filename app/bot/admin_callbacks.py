@@ -12,6 +12,9 @@ from app.core.config import settings
 from app.services.admin_service import AdminService
 from app.services.user_channel_selection_service import UserChannelSelectionService
 from app.services.monitored_channel_service import MonitoredChannelService
+from app.services.llm_quota_service import llm_quota_service
+from app.bot.admin_decorators import is_super_admin
+from app.services import get_telegram_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,8 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await admin_logs_callback(update, context)
         elif data == "admin_settings":
             await admin_settings_callback(update, context)
+        elif data == "admin_check_balance":
+            await admin_check_balance_callback(update, context)
         elif data == "admin_channels":
             await admin_channels_callback(update, context)
         elif data == "admin_channels_list":
@@ -64,6 +69,12 @@ async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}&admin=true"
     stats_web_app_url = f"{settings.API_BASE_URL}/api/v1/static/admin-statistics?user_id={user_id}&admin=true"
+    llm_config_url = f"{settings.API_BASE_URL}/api/v1/static/llm-config-management?user_id={user_id}&admin=true"
+    
+    # Check if user is super admin to show LLM quota button
+    is_super = await is_super_admin(user_id)
+    quota_status = llm_quota_service.get_status()
+    quota_exceeded = quota_status.get("quota_exceeded", False)
 
     keyboard = [
         [InlineKeyboardButton("📊 Статистика", web_app=WebAppInfo(url=stats_web_app_url))],
@@ -71,8 +82,16 @@ async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("👥 Управление пользователями", callback_data="admin_users")],
         [InlineKeyboardButton("📋 Логи системы", callback_data="admin_logs")],
         [InlineKeyboardButton("⚙️ Настройки", callback_data="admin_settings")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="start")],
     ]
+    
+    # Add LLM management buttons for super admins
+    if is_super:
+        keyboard.append([InlineKeyboardButton("🤖 Управление LLM движками", web_app=WebAppInfo(url=llm_config_url))])
+        quota_emoji = "❌" if quota_exceeded else "✅"
+        quota_text = f"{quota_emoji} Проверить баланс LLM"
+        keyboard.append([InlineKeyboardButton(quota_text, callback_data="admin_check_balance")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="start")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -229,6 +248,83 @@ async def admin_settings_callback(update: Update, context: ContextTypes.DEFAULT_
         parse_mode='HTML',
         reply_markup=reply_markup
     )
+
+
+async def admin_check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin check LLM balance callback"""
+    user_id = update.effective_user.id
+    
+    # Check if user is super admin
+    if not await is_super_admin(user_id):
+        await update.callback_query.edit_message_text(
+            "❌ Эта функция доступна только супер-администраторам",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")
+            ]])
+        )
+        return
+    
+    # Show checking message
+    await update.callback_query.edit_message_text(
+        "🔍 <b>Проверка баланса LLM</b>\n\n"
+        "⏳ Выполняется проверка баланса...",
+        parse_mode='HTML'
+    )
+    
+    try:
+        # Perform balance check
+        balance_available = await llm_quota_service.check_balance()
+        quota_status = llm_quota_service.get_status()
+        quota_exceeded = quota_status.get("quota_exceeded", False)
+        
+        if balance_available:
+            message = (
+                "✅ <b>Баланс LLM восстановлен!</b>\n\n"
+                "Обработка сообщений возобновлена автоматически.\n\n"
+            )
+            
+            # Automatically trigger reprocessing of stuck messages
+            try:
+                telegram_service = get_telegram_service()
+                await telegram_service._reprocess_stuck_messages()
+                message += "🔄 Запущена обработка застрявших сообщений."
+            except Exception as e:
+                logger.error("Error reprocessing stuck messages after balance restore: %s", e)
+                message += "⚠️ Ошибка при запуске обработки застрявших сообщений."
+        else:
+            message = (
+                "❌ <b>Баланс LLM все еще исчерпан</b>\n\n"
+                "Проверьте баланс и пополните счет.\n\n"
+                "Следующая автоматическая проверка через 15 минут."
+            )
+        
+        # Add status info
+        last_check = quota_status.get("last_balance_check_time")
+        if last_check:
+            message += f"\n\n⏰ Последняя проверка: {last_check}"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Проверить снова", callback_data="admin_check_balance")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logger.error("Error checking LLM balance: %s", e)
+        await update.callback_query.edit_message_text(
+            f"❌ <b>Ошибка при проверке баланса</b>\n\n"
+            f"Ошибка: {str(e)}",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")
+            ]])
+        )
 
 
 async def admin_channels_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -21,6 +21,8 @@ class AdminNotificationService:
         self._quota_notification_interval = 900  # Notify at most once per 15 minutes (900 seconds)
         self._last_restart_notification = None  # Timestamp of last restart notification
         self._restart_notification_interval = 900  # Notify at most once per 15 minutes (900 seconds)
+        self._last_rate_limit_notification = None  # Timestamp of last rate limit notification
+        self._rate_limit_notification_interval = 300  # Notify at most once per 5 minutes (300 seconds)
     
     def set_notification_service(self, notification_service):
         """Set the notification service (injected from main)"""
@@ -57,14 +59,18 @@ class AdminNotificationService:
                 return
             
             # Create notification message
+            # Escape date/time properly for MarkdownV2
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            escaped_time = self._escape_markdown(now_str)
+            
             message = f"""
-🚨 *Исчерпан лимит OpenAI API\\!*
+🚨 *Исчерпан лимит LLM API\\!*
 
 Новые сообщения НЕ парсятся
 
-⏰ *Время:* {datetime.now(timezone.utc).strftime('%Y\\-%m\\-%d %H:%M:%S UTC')}
+⏰ *Время:* {escaped_time}
 
-Проверьте баланс на platform\\.openai\\.com и пополните счет.
+Проверьте баланс и пополните счет\\.
 """
             
             # Send to all super admins
@@ -76,13 +82,16 @@ class AdminNotificationService:
                     if user_id:
                         try:
                             logger.info("Attempting to send notification to admin %s", user_id)
-                            await self.notification_service.send_message(
+                            success = await self.notification_service.send_message(
                                 user_id=user_id,
                                 message=message,
                                 parse_mode="MarkdownV2"
                             )
-                            logger.info("✅ Successfully sent quota error notification to super admin %s", user_id)
-                            sent_count += 1
+                            if success:
+                                logger.info("✅ Successfully sent quota error notification to super admin %s", user_id)
+                                sent_count += 1
+                            else:
+                                logger.error("❌ Failed to send notification to admin %s (send_message returned False)", user_id)
                         except Exception as e:
                             logger.error("❌ Error sending notification to admin %s: %s", user_id, e)
                 
@@ -97,6 +106,81 @@ class AdminNotificationService:
                 
         except Exception as e:
             logger.error("Error notifying admins about quota: %s", e)
+    
+    async def notify_rate_limit_exceeded(self, error_message: str, retry_count: int, retry_delay: int) -> None:
+        """Notify super admins about LLM rate limit/concurrency exceeded"""
+        try:
+            logger.info("notify_rate_limit_exceeded called: retry_count=%d, delay=%ds", retry_count, retry_delay)
+            
+            # Check if we've notified recently (within interval)
+            now = datetime.now(timezone.utc)
+            if self._last_rate_limit_notification:
+                time_since_last = (now - self._last_rate_limit_notification).total_seconds()
+                if time_since_last < self._rate_limit_notification_interval:
+                    logger.info("Rate limit already notified %d seconds ago, skipping (interval: %d)", 
+                               time_since_last, self._rate_limit_notification_interval)
+                    return
+            
+            db = mongodb.get_database()
+            
+            # Find all super admins
+            super_admins = await db.admin_users.find({
+                'role': UserRole.SUPER_ADMIN.value,
+                'is_active': True
+            }).to_list(length=None)
+            
+            if not super_admins:
+                logger.warning("No super admins found to notify about rate limit")
+                return
+            
+            # Create notification message
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            escaped_time = self._escape_markdown(now_str)
+            
+            message = f"""
+⚠️ *Превышен лимит concurrency LLM API\\!*
+
+Обработка временно замедлена
+
+⏰ *Время:* {escaped_time}
+🔄 *Повторная попытка:* {retry_count}
+⏳ *Задержка:* {retry_delay} секунд
+
+Сообщения будут обработаны с задержкой\\.
+Это нормальная ситуация при высокой нагрузке\\.
+
+💡 Для увеличения лимита обратитесь в Z\\.AI support\\.
+"""
+            
+            # Send to all super admins
+            if self.notification_service:
+                logger.info("Sending rate limit notification to %d super admins", len(super_admins))
+                sent_count = 0
+                for admin in super_admins:
+                    user_id = admin.get('user_id')
+                    if user_id:
+                        try:
+                            success = await self.notification_service.send_message(
+                                user_id=user_id,
+                                message=message,
+                                parse_mode="MarkdownV2"
+                            )
+                            if success:
+                                logger.info("✅ Successfully sent rate limit notification to super admin %s", user_id)
+                                sent_count += 1
+                            else:
+                                logger.error("❌ Failed to send rate limit notification to admin %s", user_id)
+                        except Exception as e:
+                            logger.error("❌ Error sending rate limit notification to admin %s: %s", user_id, e)
+                
+                self._last_rate_limit_notification = now
+                logger.info("Rate limit notification process completed: sent to %d/%d admins", sent_count, len(super_admins))
+            else:
+                logger.error("Notification service not available!")
+                self._last_rate_limit_notification = now
+                
+        except Exception as e:
+            logger.error("Error notifying admins about rate limit: %s", e)
     
     def _escape_markdown(self, text: str) -> str:
         """Escape special characters for MarkdownV2"""
@@ -142,17 +226,23 @@ class AdminNotificationService:
             status_emoji = "🔄" if will_retry else "❌"
             status_text = "будет повторная попытка" if will_retry else "превышено максимальное количество попыток"
             
+            # Escape date/time properly for MarkdownV2
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            escaped_time = self._escape_markdown(now_str)
+            escaped_status_text = self._escape_markdown(status_text)
+            escaped_retry_msg = self._escape_markdown('Сервис будет автоматически перезапущен через несколько секунд.') if will_retry else self._escape_markdown('Требуется ручное вмешательство!')
+            
             message = f"""
 {status_emoji} *Проблема с подключением Telegram\\!*
 
 Попытка переподключения: {attempt}/3
-Статус: {status_text}
+Статус: {escaped_status_text}
 
-⏰ *Время:* {datetime.now(timezone.utc).strftime('%Y\\-%m\\-%d %H:%M:%S UTC')}
+⏰ *Время:* {escaped_time}
 
 Ошибка: `{self._escape_markdown(error)}`
 
-{'Сервис будет автоматически перезапущен через несколько секунд\\.' if will_retry else 'Требуется ручное вмешательство\\!'}
+{escaped_retry_msg}
 """
             
             # Send to all super admins
@@ -164,13 +254,16 @@ class AdminNotificationService:
                     if user_id:
                         try:
                             logger.info("Attempting to send restart notification to admin %s", user_id)
-                            await self.notification_service.send_message(
+                            success = await self.notification_service.send_message(
                                 user_id=user_id,
                                 message=message,
                                 parse_mode="MarkdownV2"
                             )
-                            logger.info("✅ Successfully sent restart notification to super admin %s", user_id)
-                            sent_count += 1
+                            if success:
+                                logger.info("✅ Successfully sent restart notification to super admin %s", user_id)
+                                sent_count += 1
+                            else:
+                                logger.error("❌ Failed to send restart notification to admin %s (send_message returned False)", user_id)
                         except Exception as e:
                             logger.error("❌ Error sending restart notification to admin %s: %s", user_id, e)
                 

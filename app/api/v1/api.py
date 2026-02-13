@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     posts, channels, telegram, real_estate, static, ngrok, 
-    statistics, simple_filters, user_filter_matches, user_channel_selections, config, price_filters, admin, monitored_channels
+    statistics, simple_filters, user_filter_matches, user_channel_selections, config, price_filters, admin, monitored_channels, llm_config
 )
 
 api_router = APIRouter()
@@ -47,4 +47,7 @@ api_router.include_router(
 )
 api_router.include_router(
     monitored_channels.router, prefix="/monitored-channels", tags=["monitored-channels"]
+)
+api_router.include_router(
+    llm_config.router, prefix="/admin", tags=["llm-config"]
 )
