@@ -317,7 +317,7 @@ class FilterService:
             logger.info("Deleted %s matches for filter %s", result.deleted_count, filter_id)
             return result.deleted_count
         except Exception as e:
-            logger.error("Error deleting matches for filter %s: %s", e)
+            logger.error("Error deleting matches for filter %s: %s", filter_id, e)
             return 0
 
     # ==================== STATISTICS ====================
