@@ -403,105 +403,61 @@
     </div>
 
     <script>
-        // Get user ID from Telegram WebApp
+        // JWT Auth
+        let accessToken = null;
         let userId = null;
-        console.log('Initializing channel selection page...');
-        console.log('window.Telegram:', window.Telegram);
-        console.log('window.location.search:', window.location.search);
+        let isUserAdmin = false;
 
-        if (window.Telegram && window.Telegram.WebApp) {
-            console.log('WebApp available:', window.Telegram.WebApp);
-            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
+        async function authenticate() {
+            try {
+                let initData = '';
+                if (window.Telegram && window.Telegram.WebApp) {
+                    initData = window.Telegram.WebApp.initData;
+                }
+                if (!initData) {
+                    console.error('Telegram WebApp initData not available');
+                    return false;
+                }
 
-            if (window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
-                userId = window.Telegram.WebApp.initDataUnsafe.user.id;
-                console.log('User ID from Telegram:', userId);
-            } else {
-                console.log('No user data in initDataUnsafe');
+                const response = await fetch('/api/v1/auth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ init_data: initData })
+                });
+
+                if (!response.ok) {
+                    console.error('Auth failed:', response.status);
+                    return false;
+                }
+
+                const data = await response.json();
+                accessToken = data.access_token;
+                userId = data.user_id;
+                isUserAdmin = data.is_admin;
+                console.log('Authenticated, user_id:', userId, 'is_admin:', isUserAdmin);
+                return true;
+            } catch (error) {
+                console.error('Authentication error:', error);
+                return false;
             }
-        } else {
-            console.log('Telegram WebApp not available');
         }
 
-        // Check if admin mode
+        function authHeaders(extra = {}) {
+            const headers = { ...extra };
+            if (accessToken) {
+                headers['Authorization'] = 'Bearer ' + accessToken;
+            }
+            return headers;
+        }
+
+        async function authFetch(url, options = {}) {
+            options.headers = authHeaders(options.headers || {});
+            return fetch(url, options);
+        }
+
+        // Check if admin mode from URL param
         const urlParams = new URLSearchParams(window.location.search);
         const isAdmin = urlParams.get('admin') === 'true';
-        console.log('Admin mode:', isAdmin);
-
-        // If no user ID from Telegram, try to get from URL params or hash
-        if (!userId) {
-            const userIdFromUrl = urlParams.get('user_id');
-            console.log('User ID from URL (raw):', userIdFromUrl);
-
-            if (userIdFromUrl) {
-                userId = parseInt(userIdFromUrl);
-                console.log('User ID from URL (parsed):', userId);
-            } else {
-                console.log('No user_id in URL params, trying to parse from hash...');
-
-                // Try to parse user data from URL hash (tgWebAppData)
-                const hash = window.location.hash;
-                console.log('URL hash:', hash);
-
-                if (hash.includes('tgWebAppData=')) {
-                    try {
-                        const tgWebAppData = hash.split('tgWebAppData=')[1].split('&')[0];
-                        const decodedData = decodeURIComponent(tgWebAppData);
-                        console.log('Decoded tgWebAppData:', decodedData);
-
-                        // Parse user data from the decoded string
-                        const userMatch = decodedData.match(/user%3D([^&]+)/);
-                        if (userMatch) {
-                            const userDataStr = decodeURIComponent(userMatch[1]);
-                            console.log('User data string:', userDataStr);
-
-                            const userData = JSON.parse(userDataStr);
-                            console.log('Parsed user data:', userData);
-
-                            if (userData.id) {
-                                userId = userData.id;
-                                console.log('User ID from hash:', userId);
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Error parsing tgWebAppData:', e);
-                    }
-                }
-
-                // Fallback to default if still no user ID
-                if (!userId) {
-                    userId = '223720761'; // Default fallback
-                    console.log('Using default user ID:', userId);
-                }
-            }
-        }
-
-        // Fallback: if currentUserId is still null, try to get from URL
-        if (!userId) {
-            const userIdFromUrl = urlParams.get('user_id');
-            if (userIdFromUrl) {
-                userId = parseInt(userIdFromUrl);
-                console.log('Using user_id from URL as fallback:', userId);
-            }
-        }
-
-        // Final fallback: if still no user ID, show error
-        if (!userId) {
-            console.error('Could not determine user ID from any source');
-            document.addEventListener('DOMContentLoaded', function() {
-                const content = document.getElementById('content');
-                if (content) {
-                    content.innerHTML = `
-                        <div class="error">
-                            <h3>Ошибка авторизации</h3>
-                            <p>Не удалось определить ID пользователя. Попробуйте открыть страницу через бота.</p>
-                        </div>
-                    `;
-                }
-            });
-        }
-
-        console.log('Final userId:', userId);
 
         // Use current origin + API path
         const API_BASE = window.location.origin + '/api/v1/user-channel-selections';
@@ -518,7 +474,7 @@
             let url;
             if (isAdmin) {
                 // For admin, load all monitored channels
-                url = `${window.location.origin}/api/v1/monitored-channels/?user_id=${userId}`;
+                url = `${window.location.origin}/api/v1/monitored-channels/`;
                 console.log('Admin mode: loading all monitored channels');
             } else {
                 // For regular users, load available channels
@@ -527,7 +483,7 @@
             console.log('Fetching URL:', url);
 
             try {
-                const response = await fetch(url);
+                const response = await authFetch(url);
                 console.log('Response status:', response.status);
                 console.log('Response ok:', response.ok);
                 console.log('Response headers:', response.headers);
@@ -674,12 +630,12 @@
                 let response;
                 if (isAdmin) {
                     // For admin, toggle channel status using monitored-channels API
-                    response = await fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}/toggle?toggled_by=${userId}`, {
+                    response = await authFetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}/toggle`, {
                         method: 'POST'
                     });
                 } else {
                     // For regular users, toggle channel selection
-                    response = await fetch(`${API_BASE}/user/${userId}/toggle/${channelId}`, {
+                    response = await authFetch(`${API_BASE}/user/${userId}/toggle/${channelId}`, {
                         method: 'POST'
                     });
                 }
@@ -811,7 +767,7 @@
 
                     if (channelsToToggle.length > 0) {
                         const promises = channelsToToggle.map(channel =>
-                            fetch(`${window.location.origin}/api/v1/monitored-channels/${channel.id}/toggle?toggled_by=${userId}`, {
+                            authFetch(`${window.location.origin}/api/v1/monitored-channels/${channel.id}/toggle`, {
                                 method: 'POST'
                             })
                         );
@@ -861,13 +817,12 @@
 
                 // Save to server
                 try {
-                    const response = await fetch(`${API_BASE}/quick-update`, {
+                    const response = await authFetch(`${API_BASE}/quick-update`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
                         body: JSON.stringify({
-                            user_id: parseInt(userId),
                             selected_channel_ids: Array.from(newSelectedChannels)
                         })
                     });
@@ -903,13 +858,12 @@
             saveBtn.textContent = 'Сохранение...';
 
             try {
-                const response = await fetch(`${API_BASE}/quick-update`, {
+                const response = await authFetch(`${API_BASE}/quick-update`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        user_id: parseInt(userId),
                         selected_channel_ids: Array.from(selectedChannels)
                     })
                 });
@@ -1065,7 +1019,7 @@
             addButton.disabled = true;
 
             try {
-                const response = await fetch(`${window.location.origin}/api/v1/monitored-channels/?created_by=${userId}`, {
+                const response = await authFetch(`${window.location.origin}/api/v1/monitored-channels/`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1183,7 +1137,7 @@
                 try {
                     // Delete selected channels
                     const deletePromises = Array.from(selectedChannels).map(channelId =>
-                        fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}?deleted_by=${userId}`, {
+                        authFetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}`, {
                             method: 'DELETE'
                         })
                     );
@@ -1211,7 +1165,7 @@
         async function deleteChannel(channelId) {
             if (confirm('Удалить этот канал? Это действие нельзя отменить.')) {
                 try {
-                    const response = await fetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}?deleted_by=${userId}`, {
+                    const response = await authFetch(`${window.location.origin}/api/v1/monitored-channels/${channelId}`, {
                         method: 'DELETE'
                     });
 
@@ -1241,10 +1195,17 @@
         }
 
         // Initialize
-        if (userId) {
+        (async function() {
+            const authenticated = await authenticate();
+            if (!authenticated) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').textContent = 'Ошибка авторизации. Откройте страницу через Telegram бота.';
+                document.getElementById('error').style.display = 'block';
+                return;
+            }
             initializePage();
             loadChannels();
-        }
+        })();
     </script>
 </body>
 </html>

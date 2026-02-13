@@ -1997,7 +1997,7 @@ class TelegramService:
             # Create inline keyboard with settings button
             keyboard = [[InlineKeyboardButton(
                 "⚙️ Настроить фильтры", 
-                web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}")
+                web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?v=1")
             )]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 

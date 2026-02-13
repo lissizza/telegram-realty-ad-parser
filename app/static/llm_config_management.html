@@ -264,14 +264,58 @@
         tg.ready();
         tg.expand();
 
-        const userId = new URLSearchParams(window.location.search).get('user_id');
         const API_BASE = '/api/v1';
+
+        // JWT Auth
+        let accessToken = null;
+
+        async function authenticate() {
+            try {
+                const initData = tg.initData;
+                if (!initData) {
+                    console.error('Telegram WebApp initData not available');
+                    return false;
+                }
+
+                const response = await fetch('/api/v1/auth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ init_data: initData })
+                });
+
+                if (!response.ok) {
+                    console.error('Auth failed:', response.status);
+                    return false;
+                }
+
+                const data = await response.json();
+                accessToken = data.access_token;
+                console.log('Authenticated, user_id:', data.user_id);
+                return true;
+            } catch (error) {
+                console.error('Authentication error:', error);
+                return false;
+            }
+        }
+
+        function authHeaders(extra = {}) {
+            const headers = { ...extra };
+            if (accessToken) {
+                headers['Authorization'] = 'Bearer ' + accessToken;
+            }
+            return headers;
+        }
+
+        async function authFetch(url, options = {}) {
+            options.headers = authHeaders(options.headers || {});
+            return fetch(url, options);
+        }
 
         let editingConfigId = null;
 
         async function loadConfigs() {
             try {
-                const response = await fetch(`${API_BASE}/admin/llm-configs?user_id=${userId}`);
+                const response = await authFetch(`${API_BASE}/admin/llm-configs`);
                 if (!response.ok) {
                     throw new Error('Ошибка загрузки конфигураций');
                 }
@@ -312,7 +356,7 @@
 
         async function activateConfig(configId) {
             try {
-                const response = await fetch(`${API_BASE}/admin/llm-configs/${configId}/activate?user_id=${userId}`, {
+                const response = await authFetch(`${API_BASE}/admin/llm-configs/${configId}/activate`, {
                     method: 'POST'
                 });
                 if (!response.ok) {
@@ -330,7 +374,7 @@
                 return;
             }
             try {
-                const response = await fetch(`${API_BASE}/admin/llm-configs/${configId}?user_id=${userId}`, {
+                const response = await authFetch(`${API_BASE}/admin/llm-configs/${configId}`, {
                     method: 'DELETE'
                 });
                 if (!response.ok) {
@@ -346,7 +390,7 @@
 
         async function editConfig(configId) {
             try {
-                const response = await fetch(`${API_BASE}/admin/llm-configs/${configId}?user_id=${userId}&include_key=true`);
+                const response = await authFetch(`${API_BASE}/admin/llm-configs/${configId}?include_key=true`);
                 if (!response.ok) {
                     throw new Error('Ошибка загрузки конфигурации');
                 }
@@ -396,14 +440,14 @@
                 let response;
                 if (editingConfigId) {
                     // Update existing
-                    response = await fetch(`${API_BASE}/admin/llm-configs/${editingConfigId}?user_id=${userId}`, {
+                    response = await authFetch(`${API_BASE}/admin/llm-configs/${editingConfigId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(formData)
                     });
                 } else {
                     // Create new
-                    response = await fetch(`${API_BASE}/admin/llm-configs?user_id=${userId}`, {
+                    response = await authFetch(`${API_BASE}/admin/llm-configs`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(formData)
@@ -438,7 +482,14 @@
         }
 
         // Load configs on page load
-        loadConfigs();
+        (async function() {
+            const authenticated = await authenticate();
+            if (!authenticated) {
+                showError('Ошибка авторизации. Откройте страницу через Telegram бота.');
+                return;
+            }
+            loadConfigs();
+        })();
     </script>
 </body>
 </html>
