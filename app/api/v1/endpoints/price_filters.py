@@ -2,7 +2,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.dependencies import get_current_user
 from app.models.price_filter import PriceFilter
+from app.models.token import TokenData
+from app.services.filter_service import FilterService
 from app.services.price_filter_service import PriceFilterService
 
 router = APIRouter()
@@ -42,15 +45,27 @@ def get_price_filter_service() -> PriceFilterService:
     return PriceFilterService()
 
 
+def get_filter_service() -> FilterService:
+    """Dependency to get filter service"""
+    return FilterService()
+
+
 @router.get("/filters/{filter_id}/price-filters", response_model=List[PriceFilterResponse])
 async def get_price_filters(
     filter_id: str,
-    service: PriceFilterService = Depends(get_price_filter_service)
+    current_user: TokenData = Depends(get_current_user),
+    service: PriceFilterService = Depends(get_price_filter_service),
+    filter_service: FilterService = Depends(get_filter_service)
 ):
     """Get all price filters for a specific SimpleFilter"""
     try:
+        # Check ownership of parent filter
+        parent_filter = await filter_service.get_filter_by_id(filter_id)
+        if parent_filter and parent_filter.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="You can only view your own price filters")
+
         price_filters = await service.get_price_filters_by_filter_id(filter_id)
-        
+
         return [
             PriceFilterResponse(
                 id=pf.id,
@@ -64,6 +79,8 @@ async def get_price_filters(
             )
             for pf in price_filters
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -74,10 +91,19 @@ async def get_price_filters(
 @router.post("/price-filters", response_model=dict)
 async def create_price_filter(
     price_filter_data: PriceFilterCreate,
-    service: PriceFilterService = Depends(get_price_filter_service)
+    current_user: TokenData = Depends(get_current_user),
+    service: PriceFilterService = Depends(get_price_filter_service),
+    filter_service: FilterService = Depends(get_filter_service)
 ):
     """Create a new price filter"""
     try:
+        # Check ownership of parent filter
+        parent_filter = await filter_service.get_filter_by_id(price_filter_data.filter_id)
+        if not parent_filter:
+            raise HTTPException(status_code=404, detail="Parent filter not found")
+        if parent_filter.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="You can only create price filters for your own filters")
+
         # Validate price range
         if price_filter_data.min_price is not None and price_filter_data.max_price is not None:
             if price_filter_data.min_price > price_filter_data.max_price:
@@ -85,14 +111,14 @@ async def create_price_filter(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="min_price cannot be greater than max_price"
                 )
-        
+
         # Validate at least one price is specified
         if price_filter_data.min_price is None and price_filter_data.max_price is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one of min_price or max_price must be specified"
             )
-        
+
         price_filter = PriceFilter(
             filter_id=price_filter_data.filter_id,
             min_price=price_filter_data.min_price,
@@ -100,14 +126,14 @@ async def create_price_filter(
             currency=price_filter_data.currency,
             is_active=price_filter_data.is_active
         )
-        
+
         price_filter_id = await service.create_price_filter(price_filter)
-        
+
         return {
             "id": price_filter_id,
             "message": "Price filter created successfully"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -121,38 +147,39 @@ async def create_price_filter(
 async def update_price_filter(
     price_filter_id: str,
     update_data: PriceFilterUpdate,
+    current_user: TokenData = Depends(get_current_user),
     service: PriceFilterService = Depends(get_price_filter_service)
 ):
     """Update a price filter"""
     try:
         # Validate price range if both are provided
-        if (update_data.min_price is not None and 
-            update_data.max_price is not None and 
+        if (update_data.min_price is not None and
+            update_data.max_price is not None and
             update_data.min_price > update_data.max_price):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="min_price cannot be greater than max_price"
             )
-        
+
         # Convert to dict, removing None values
         update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
-        
+
         if not update_dict:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid fields to update"
             )
-        
+
         success = await service.update_price_filter(price_filter_id, update_dict)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Price filter not found"
             )
-        
+
         return {"message": "Price filter updated successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -165,20 +192,21 @@ async def update_price_filter(
 @router.delete("/price-filters/{price_filter_id}", response_model=dict)
 async def delete_price_filter(
     price_filter_id: str,
+    current_user: TokenData = Depends(get_current_user),
     service: PriceFilterService = Depends(get_price_filter_service)
 ):
     """Delete a price filter"""
     try:
         success = await service.delete_price_filter(price_filter_id)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Price filter not found"
             )
-        
+
         return {"message": "Price filter deleted successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:

@@ -81,14 +81,14 @@ class TelegramBot:
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
                     web_app=WebAppInfo(
-                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}&v={FILTERS_WEBAPP_VERSION}"
+                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?v={FILTERS_WEBAPP_VERSION}"
                     ),
                 )
             ],
             [
                 InlineKeyboardButton(
                     "⚙️ Выбор каналов",
-                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}"),
+                    web_app=WebAppInfo(url=f"{settings.API_BASE_URL}/api/v1/static/channel-selection"),
                 ),
             ],
             [
@@ -146,7 +146,7 @@ class TelegramBot:
                 InlineKeyboardButton(
                     "⚙️ Настроить фильтры",
                     web_app=WebAppInfo(
-                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?user_id={user_id}&v={FILTERS_WEBAPP_VERSION}"
+                        url=f"{settings.API_BASE_URL}/api/v1/static/simple-filters?v={FILTERS_WEBAPP_VERSION}"
                     ),
                 )
             ]

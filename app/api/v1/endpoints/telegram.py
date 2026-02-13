@@ -1,8 +1,10 @@
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.dependencies import get_current_admin
+from app.models.token import TokenData
 from app.services.telegram_service import TelegramService
 
 router = APIRouter()
@@ -31,8 +33,11 @@ class ReprocessRequest(BaseModel):
 
 
 @router.post("/start-monitoring")
-async def start_monitoring(request: StartMonitoringRequest):
-    """Start monitoring Telegram channels"""
+async def start_monitoring(
+    request: StartMonitoringRequest,
+    current_user: TokenData = Depends(get_current_admin)
+):
+    """Start monitoring Telegram channels (admin only)"""
     try:
         telegram_service = TelegramService()
         await telegram_service.start_monitoring()
@@ -42,8 +47,11 @@ async def start_monitoring(request: StartMonitoringRequest):
 
 
 @router.post("/stop-monitoring")
-async def stop_monitoring(request: StopMonitoringRequest):
-    """Stop monitoring Telegram channels"""
+async def stop_monitoring(
+    request: StopMonitoringRequest,
+    current_user: TokenData = Depends(get_current_admin)
+):
+    """Stop monitoring Telegram channels (admin only)"""
     try:
         telegram_service = TelegramService()
         await telegram_service.stop_monitoring()
@@ -77,12 +85,15 @@ async def get_monitoring_status():
 
 
 @router.post("/refilter")
-async def refilter_ads(request: RefilterRequest):
-    """Refilter existing ads without reprocessing"""
+async def refilter_ads(
+    request: RefilterRequest,
+    current_user: TokenData = Depends(get_current_admin)
+):
+    """Refilter existing ads without reprocessing (admin only)"""
     try:
         from app.services import get_telegram_service
         telegram_service = get_telegram_service()
         result = await telegram_service.refilter_ads(request.count, request.user_id)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

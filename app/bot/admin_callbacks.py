@@ -67,9 +67,9 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def admin_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin panel callback"""
     user_id = update.effective_user.id
-    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection?user_id={user_id}&admin=true"
-    stats_web_app_url = f"{settings.API_BASE_URL}/api/v1/static/admin-statistics?user_id={user_id}&admin=true"
-    llm_config_url = f"{settings.API_BASE_URL}/api/v1/static/llm-config-management?user_id={user_id}&admin=true"
+    web_app_url = f"{settings.API_BASE_URL}/api/v1/static/channel-selection?admin=true"
+    stats_web_app_url = f"{settings.API_BASE_URL}/api/v1/static/admin-statistics?admin=true"
+    llm_config_url = f"{settings.API_BASE_URL}/api/v1/static/llm-config-management?admin=true"
     
     # Check if user is super admin to show LLM quota button
     is_super = await is_super_admin(user_id)

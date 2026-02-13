@@ -1,11 +1,14 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    posts, channels, telegram, real_estate, static, ngrok, 
-    statistics, simple_filters, user_filter_matches, user_channel_selections, config, price_filters, admin, monitored_channels, llm_config
+    posts, channels, telegram, real_estate, static, ngrok,
+    statistics, simple_filters, user_filter_matches, user_channel_selections, config, price_filters, admin, monitored_channels, llm_config, auth
 )
 
 api_router = APIRouter()
+api_router.include_router(
+    auth.router, prefix="/auth", tags=["auth"]
+)
 api_router.include_router(
     posts.router, prefix="/posts", tags=["posts"]
 )

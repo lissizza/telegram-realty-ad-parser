@@ -2,11 +2,12 @@
 API endpoints for managing LLM configurations.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from app.bot.admin_decorators import is_super_admin
+from app.api.dependencies import get_current_super_admin
+from app.models.token import TokenData
 from app.services.llm_config_service import llm_config_service
 
 router = APIRouter()
@@ -53,14 +54,11 @@ class LLMConfigResponse(BaseModel):
 
 @router.get("/llm-configs", response_model=List[LLMConfigResponse])
 async def get_llm_configs(
-    user_id: int = Query(..., description="User ID"),
-    include_keys: bool = Query(False, description="Include decrypted API keys (super admin only)")
+    include_keys: bool = False,
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Get all LLM configurations (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         configs = await llm_config_service.get_all_configs(include_keys=include_keys)
         return configs
     except HTTPException:
@@ -72,18 +70,15 @@ async def get_llm_configs(
 @router.get("/llm-configs/{config_id}", response_model=LLMConfigResponse)
 async def get_llm_config(
     config_id: str,
-    user_id: int = Query(..., description="User ID"),
-    include_key: bool = Query(False, description="Include decrypted API key (super admin only)")
+    include_key: bool = False,
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Get LLM configuration by ID (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         config = await llm_config_service.get_config_by_id(config_id, include_key=include_key)
         if not config:
             raise HTTPException(status_code=404, detail="Configuration not found")
-        
+
         return config
     except HTTPException:
         raise
@@ -93,18 +88,15 @@ async def get_llm_config(
 
 @router.get("/llm-configs/active", response_model=LLMConfigResponse)
 async def get_active_llm_config(
-    user_id: int = Query(..., description="User ID"),
-    include_key: bool = Query(False, description="Include decrypted API key (super admin only)")
+    include_key: bool = False,
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Get currently active LLM configuration (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         config = await llm_config_service.get_active_config(include_key=include_key)
         if not config:
             raise HTTPException(status_code=404, detail="No active configuration found")
-        
+
         return config
     except HTTPException:
         raise
@@ -115,13 +107,10 @@ async def get_active_llm_config(
 @router.post("/llm-configs", response_model=dict)
 async def create_llm_config(
     config_data: LLMConfigCreate,
-    user_id: int = Query(..., description="User ID")
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Create new LLM configuration (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         config_id = await llm_config_service.create_config(
             name=config_data.name,
             provider=config_data.provider,
@@ -130,9 +119,9 @@ async def create_llm_config(
             base_url=config_data.base_url,
             max_tokens=config_data.max_tokens,
             temperature=config_data.temperature,
-            created_by=user_id,
+            created_by=current_user.user_id,
         )
-        
+
         return {"config_id": config_id, "message": "Configuration created successfully"}
     except HTTPException:
         raise
@@ -144,13 +133,10 @@ async def create_llm_config(
 async def update_llm_config(
     config_id: str,
     config_data: LLMConfigUpdate,
-    user_id: int = Query(..., description="User ID")
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Update LLM configuration (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         success = await llm_config_service.update_config(
             config_id=config_id,
             name=config_data.name,
@@ -161,10 +147,10 @@ async def update_llm_config(
             max_tokens=config_data.max_tokens,
             temperature=config_data.temperature,
         )
-        
+
         if not success:
             raise HTTPException(status_code=404, detail="Configuration not found")
-        
+
         return {"message": "Configuration updated successfully"}
     except HTTPException:
         raise
@@ -175,17 +161,14 @@ async def update_llm_config(
 @router.post("/llm-configs/{config_id}/activate", response_model=dict)
 async def activate_llm_config(
     config_id: str,
-    user_id: int = Query(..., description="User ID")
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Activate LLM configuration (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         success = await llm_config_service.set_active_config(config_id)
         if not success:
             raise HTTPException(status_code=404, detail="Configuration not found")
-        
+
         return {"message": "Configuration activated successfully"}
     except HTTPException:
         raise
@@ -196,17 +179,14 @@ async def activate_llm_config(
 @router.delete("/llm-configs/{config_id}", response_model=dict)
 async def delete_llm_config(
     config_id: str,
-    user_id: int = Query(..., description="User ID")
+    current_user: TokenData = Depends(get_current_super_admin),
 ):
     """Delete LLM configuration (super admin only)"""
     try:
-        if not await is_super_admin(user_id):
-            raise HTTPException(status_code=403, detail="Super admin access required")
-        
         success = await llm_config_service.delete_config(config_id)
         if not success:
             raise HTTPException(status_code=404, detail="Configuration not found")
-        
+
         return {"message": "Configuration deleted successfully"}
     except HTTPException:
         raise
@@ -214,8 +194,3 @@ async def delete_llm_config(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-
