@@ -130,14 +130,12 @@ async def lifespan(app: FastAPI):
     try:
         # Start Telegram bot
         if settings.TELEGRAM_BOT_TOKEN:
-            logger.info(f"Starting Telegram bot with token: {settings.TELEGRAM_BOT_TOKEN[:10]}...")
+            logger.info("Starting Telegram bot...")
             bot_task = asyncio.create_task(telegram_bot.start_bot())
             logger.info("Telegram bot task created")
 
         # Start parsing service - monitor channels for real estate ads
-        logger.info(
-            f"Checking Telegram API credentials: API_ID={settings.TELEGRAM_API_ID}, API_HASH={settings.TELEGRAM_API_HASH[:10] if settings.TELEGRAM_API_HASH else None}"
-        )
+        logger.info("Checking Telegram API credentials: API_ID=%s, API_HASH=***", settings.TELEGRAM_API_ID)
         if settings.TELEGRAM_API_ID and settings.TELEGRAM_API_HASH:
             logger.info(f"Starting Telegram parsing service with API_ID: {settings.TELEGRAM_API_ID}")
             try:
@@ -182,14 +180,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Set up CORS - only allow configured origins (empty = no cross-origin requests)
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)

@@ -60,6 +60,7 @@ class Settings(BaseSettings):
 
     # === WEB APP SETTINGS ===
     API_BASE_URL: str = Field(default="https://your-domain.com", description="Base URL for API (used in Web App)")
+    CORS_ORIGINS: str = Field(default="", description="Allowed CORS origins (comma-separated). Empty = no CORS.")
 
     # === NGROK SETTINGS ===
     NGROK_AUTHTOKEN: Optional[str] = Field(default=None, description="Ngrok auth token for development")
