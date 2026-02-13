@@ -42,6 +42,7 @@ This repository participates in **Hacktoberfest**! We welcome contributions from
 - Update documentation if needed
 - Add tests for new features
 - Ensure all tests pass before submitting
+- Never commit directly to `main`; use a feature branch and merge via PR
 
 ### Questions?
 
